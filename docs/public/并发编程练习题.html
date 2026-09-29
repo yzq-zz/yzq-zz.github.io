@@ -1,0 +1,1710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>并发编程练习题集</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f0f2f5;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 920px;
+            margin: 0 auto;
+        }
+        .site-header {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            padding: 30px;
+            border-radius: 10px 10px 0 0;
+        }
+        .site-header h1 { font-size: 26px; margin-bottom: 8px; }
+        .site-header p { font-size: 14px; opacity: 0.85; }
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            margin-top: 20px;
+            overflow: hidden;
+        }
+        /* ===== 目录 ===== */
+        .toc { padding: 25px 30px; }
+        .toc h2 { font-size: 18px; color: #2c3e50; margin-bottom: 15px; }
+        .toc table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        .toc th, .toc td {
+            border: 1px solid #e5e8ec;
+            padding: 10px 12px;
+            text-align: left;
+        }
+        .toc th { background: #f8f9fa; color: #2c3e50; }
+        .toc a { color: #3498db; text-decoration: none; font-weight: 600; }
+        .toc a:hover { text-decoration: underline; }
+        .status-done { color: #27ae60; font-weight: 600; }
+        .status-empty { color: #b2bec3; }
+        .agent-tip {
+            margin-top: 15px;
+            background: #fff8e6;
+            border: 1px solid #f5e6a8;
+            border-radius: 6px;
+            padding: 12px 15px;
+            font-size: 13px;
+            color: #7d6608;
+        }
+        /* ===== 题目区块 ===== */
+        .section { padding: 30px; border-top: 6px solid #eef1f4; }
+        .section-header { border-radius: 6px; padding: 18px 22px; color: white; margin-bottom: 25px; }
+        .section-header h2 { font-size: 20px; margin-bottom: 6px; }
+        .section-header .meta { font-size: 13px; opacity: 0.85; display: flex; flex-wrap: wrap; gap: 18px; }
+        .c-blue   { background: #2c3e50; }
+        .c-purple { background: #8e44ad; }
+        .c-red    { background: #e74c3c; }
+        .c-orange { background: #f39c12; }
+        .c-teal   { background: #16a085; }
+        .block-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin: 25px 0 10px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #dfe6ec;
+        }
+        .code-block {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 18px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13.5px;
+            overflow-x: auto;
+            line-height: 1.55;
+        }
+        .code-block pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
+        .highlight { background: #fff3cd; padding: 1px 4px; border-radius: 3px; }
+        .danger { background: #f8d7da; padding: 1px 4px; border-radius: 3px; }
+        .question-box {
+            background: #e8f4f8;
+            border-left: 4px solid #3498db;
+            padding: 15px 20px;
+            border-radius: 0 6px 6px 0;
+        }
+        .question-box ol { margin-left: 22px; }
+        .question-box li { margin: 8px 0; }
+        .run-box {
+            background: #eafaf1;
+            border: 1px solid #a5d6a7;
+            border-radius: 6px;
+            padding: 12px 15px;
+            font-size: 13px;
+            margin: 12px 0;
+        }
+        .run-box code {
+            background: #f1f3f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12.5px;
+        }
+        /* ===== 答题区 ===== */
+        .answer-section {
+            background: #f8f9fa;
+            border: 2px dashed #ced6e0;
+            border-radius: 8px;
+            padding: 18px;
+            margin-top: 12px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 130px;
+            padding: 12px;
+            border: 1px solid #d5dbe0;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+            margin-bottom: 12px;
+        }
+        textarea:focus { outline: none; border-color: #3498db; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; }
+        button {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.25s;
+        }
+        .btn-save   { background: #3498db; color: white; }
+        .btn-save:hover { background: #2980b9; }
+        .btn-clear  { background: #e74c3c; color: white; }
+        .btn-clear:hover { background: #c0392b; }
+        .btn-toggle { background: #27ae60; color: white; }
+        .btn-toggle:hover { background: #229954; }
+        .save-status { margin-top: 8px; font-size: 12.5px; color: #27ae60; }
+        .ref-answer {
+            display: none;
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            border-radius: 6px;
+            padding: 18px;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        .ref-answer.show { display: block; }
+        .ref-answer h4 { color: #2e7d32; margin: 12px 0 6px; }
+        .ref-answer h4:first-child { margin-top: 0; }
+        .ref-answer ul, .ref-answer ol { margin: 6px 0 6px 22px; }
+        .back-toc { margin-top: 25px; font-size: 13px; }
+        .back-toc a { color: #3498db; text-decoration: none; }
+        .back-toc a:hover { text-decoration: underline; }
+        .source-note {
+            margin-top: 18px;
+            background: #fef9e7;
+            border: 1px solid #f5e6a8;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 12.5px;
+            color: #7d6608;
+        }
+        .site-footer {
+            text-align: center;
+            font-size: 12.5px;
+            color: #95a5a6;
+            padding: 25px 0 10px;
+        }
+    </style>
+</head>
+<body>
+
+<!--
+================ AGENT 出题索引与方法论（后续AI出题前先读这段，勿删） ================
+权威进度以本文件顶部目录为准，出题前只需读本注释和目录表格，无需通读全文。
+
+============== 一、出题方法论（两类题目） ==============
+
+【A类：并发底层原理题（题01-05）】
+  来源：fucking-java-concurrency 仓库、《Java并发编程的艺术》
+  出题方式：给badcase代码 → 问"为什么错/怎么修"
+  知识点：JMM（可见性/原子性/有序性）、锁、重排序、死锁
+
+【B类：业务场景代码优化题（题06起）】
+  来源：真实面试场景题（订单支付/库存/转账/MQ/缓存/分布式锁等）
+  出题方式：给真实业务代码badcase → 问"有什么问题/怎么优化"
+  知识点：6维度审查框架（见下方）
+
+  B类题目审代码时按6个维度逐一过：
+  1. 并发安全：两个线程同时跑会怎样？JVM锁 vs 分布式锁？锁粒度？check-then-act？
+  2. 事务一致性：多个写操作在同一事务里吗？部分失败怎么办？
+  3. 幂等性：重试一次会怎样？重复扣费/重复下单？
+  4. 性能：锁持有多久？多余查询？N+1？能乐观锁替代悲观锁？
+  5. 异常处理：第二步失败第一步怎么补偿？回滚/重试/兜底？
+  6. 数据类型：金额用double了吗？BigDecimal比较方向对吗？
+
+  B类常见业务场景（出题选材范围）：
+  - 订单支付/结算（settleOrder）
+  - 库存扣减/秒杀
+  - 转账/账户余额
+  - MQ消费（重复消费、顺序、积压）
+  - 缓存使用（穿透/击穿/雪崩）
+  - 分布式锁使用（Redis锁的坑）
+  - 限流/熔断/降级
+
+============== 二、已出题目清单（勿重复出） ==============
+
+| 题号 | 题目                         | 来源                                        | 类型 | 知识点                         |
+| 01  | 双重检查锁定的隐患            | 《Java并发编程的艺术》P137                   | A   | 重排序、volatile、DCL          |
+| 02  | 延迟初始化的线程安全问题       | 《Java并发编程的艺术》P136                   | A   | 竞态条件、可见性               |
+| 03  | volatile能保证计数正确吗       | fucking-java-concurrency/WrongCounterDemo    | A   | volatile原子性误区             |
+| 04  | 信号变量为什么没生效           | fucking-java-concurrency/NoPublishDemo       | A   | 可见性、JIT优化                |
+| 05  | 对称加锁引发的死锁             | fucking-java-concurrency/SymmetricLockDeadlockDemo | A | 死锁、锁顺序                |
+| 06  | 秒杀库存扣减的竞态条件         | 面试场景题                                   | B   | check-then-act、原子扣减       |
+| 07  | 支付回调重复处理               | 面试场景题                                   | B   | 幂等性、事务、分布式锁         |
+| 08  | MQ消费：重复消费与顺序问题     | 面试场景题                                   | B   | 幂等、顺序消费、异常重试       |
+| 09  | 缓存击穿：热点key过期           | 面试场景题                                   | B   | 缓存击穿/穿透/雪崩、分布式锁   |
+| 10  | Redis分布式锁的5个坑           | 面试场景题                                   | B   | SETNX非原子、误删锁、锁续期    |
+
+已覆盖知识点（A+B）：
+  可见性 / 原子性 / 重排序 / 死锁 / 竞态条件 / DCL单例
+  check-then-act / 事务一致性 / 幂等性 / 缓存击穿穿透雪崩 / 分布式锁陷阱
+
+============== 三、待出题方向（下批候选） ==============
+A类待出：
+- fucking-java-concurrency/InvalidLongDemo        → long/double 非原子读写、值撕裂
+- fucking-java-concurrency/SynchronizationOnMutableFieldDemo → 在可变字段上同步导致锁失效
+- fucking-java-concurrency/InvalidCombinationStateDemo → 组合状态读取到从未写过的非法组合
+- fucking-java-concurrency/FinalInitialDemo       → 指令重排序导致非final字段读到默认值
+- fucking-java-concurrency/CyclicThreadPoolDeadLockDemo → 线程池相互提交任务的循环死锁
+- fucking-java-concurrency/HashMapHangDemo        → HashMap并发扩容死循环
+B类待出：
+- 限流算法实现（令牌桶/漏桶）的并发问题
+- 超卖问题：Redis Lua预扣 + 异步落库
+- 分布式事务（Seata AT/TCC/Saga选型与坑）
+- 热点账户更新（扣减瓶颈、分桶方案）
+
+============== 四、新增题目规则 ==============
+1. 新增一个 <div class="card section" id="ex-NN"> 区块（复制已有题目结构改内容）
+2. 目录表格 <tbody> 末尾加一行
+3. 本注释的"已出题目清单"表格加一行
+4. localStorage 答案键名格式：exercise_NN_answer（NN为两位数）
+5. B类题目的badcase代码必须是完整的业务方法，不能是伪代码片段
+6. 参考答案必须按6维度框架逐一分析，给出修复代码
+=========================== END AGENT NOTE ===========================
+-->
+
+<div class="container">
+
+    <div class="site-header">
+        <h1>并发编程练习题集</h1>
+        <p>来源：《Java并发编程的艺术》 + fucking-java-concurrency 开源仓库（本地路径：/Users/yzq/Desktop/学习资料/fucking-java-concurrency）</p>
+        <p>练习方法：先盲审代码找问题 → 在输入框写下分析并保存 → 对照参考答案。答案保存在浏览器本地（localStorage），可随时复制给AI批改。</p>
+    </div>
+
+    <!-- ==================== 出题方法论（Agent出题指南） ==================== -->
+    <div class="card toc">
+        <h2>🧩 出题方法论（Agent出题前必读）</h2>
+        <p style="font-size:14px; margin-bottom:15px; color:#2c3e50;">本练习集分两类题目，后续Agent按此框架出题：</p>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; font-size:14px;">
+            <div style="background:#eaf2f8; border-radius:8px; padding:15px;">
+                <h3 style="color:#2c3e50; font-size:15px; margin-bottom:8px;">A类：并发底层原理题（题01-05）</h3>
+                <ul style="margin-left:18px; font-size:13px;">
+                    <li>来源：fucking-java-concurrency、《Java并发编程的艺术》</li>
+                    <li>出题方式：给badcase → 问"为什么错/怎么修"</li>
+                    <li>知识点：JMM（可见性/原子性/有序性）、锁、重排序、死锁</li>
+                </ul>
+            </div>
+            <div style="background:#fef9e7; border-radius:8px; padding:15px;">
+                <h3 style="color:#7d6608; font-size:15px; margin-bottom:8px;">B类：业务场景代码优化题（题06起）</h3>
+                <ul style="margin-left:18px; font-size:13px;">
+                    <li>来源：真实面试场景题（支付/库存/MQ/缓存/分布式锁）</li>
+                    <li>出题方式：给真实业务代码badcase → 问"有什么问题/怎么优化"</li>
+                    <li>知识点：右侧6维度审查框架</li>
+                </ul>
+            </div>
+        </div>
+
+        <h3 style="font-size:15px; color:#2c3e50; margin:20px 0 10px;">📋 B类审代码6维度框架</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:13.5px;">
+            <thead>
+                <tr style="background:#f8f9fa;">
+                    <th style="border:1px solid #e5e8ec; padding:8px 10px; text-align:left; width:110px;">维度</th>
+                    <th style="border:1px solid #e5e8ec; padding:8px 10px; text-align:left; width:280px;">问自己什么</th>
+                    <th style="border:1px solid #e5e8ec; padding:8px 10px; text-align:left;">典型bad case</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px; font-weight:600;">并发安全</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">两个线程同时跑会怎样？JVM锁 vs 分布式锁？锁粒度？check-then-act？</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">synchronized管分布式、锁全量、先查后扣</td>
+                </tr>
+                <tr>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px; font-weight:600;">事务一致性</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">多个写操作在同一事务里吗？部分失败怎么办？</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">扣款成功+标记失败=数据不一致</td>
+                </tr>
+                <tr>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px; font-weight:600;">幂等性</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">重试一次会怎样？重复扣费/重复下单？</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">支付回调重试、MQ重复消费</td>
+                </tr>
+                <tr>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px; font-weight:600;">性能</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">锁持有多久？多余查询？N+1？乐观锁替代悲观锁？</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">先查后扣（2次DB→1次）、FOR UPDATE持有太久</td>
+                </tr>
+                <tr>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px; font-weight:600;">异常处理</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">第二步失败第一步怎么办？补偿/回滚/兜底？</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">无try-catch、无补偿机制</td>
+                </tr>
+                <tr>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px; font-weight:600;">数据类型</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">金额用double了吗？BigDecimal比较方向对吗？</td>
+                    <td style="border:1px solid #e5e8ec; padding:8px 10px;">double精度丢失、compareTo方向写反</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="agent-tip" style="margin-top:15px;">
+            <strong>出题流程：</strong>① 选业务场景 → ② 写出有坑的badcase代码（必须是完整方法，不能是伪代码） → ③ 按6维度逐一检查代码、找出至少2-3个问题 → ④ 出题（列问题） → ⑤ 参考答案按6维度逐一分析+修复代码 → ⑥ 更新目录+AGENT注释。
+        </div>
+    </div>
+
+    <!-- ==================== 目录 ==================== -->
+    <div class="card toc" id="top">
+        <h2>📖 目录</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:52px;">题号</th>
+                    <th>题目</th>
+                    <th>来源</th>
+                    <th>知识点</th>
+                    <th style="width:80px;">难度</th>
+                    <th style="width:90px;">答题状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>01</td>
+                    <td><a href="#ex-01">双重检查锁定的隐患</a></td>
+                    <td>《Java并发编程的艺术》P137</td>
+                    <td>重排序、volatile、DCL</td>
+                    <td>⭐⭐⭐</td>
+                    <td class="status" data-q="01"></td>
+                </tr>
+                <tr>
+                    <td>02</td>
+                    <td><a href="#ex-02">延迟初始化的线程安全问题</a></td>
+                    <td>《Java并发编程的艺术》P136</td>
+                    <td>竞态条件、可见性</td>
+                    <td>⭐⭐</td>
+                    <td class="status" data-q="02"></td>
+                </tr>
+                <tr>
+                    <td>03</td>
+                    <td><a href="#ex-03">volatile能保证计数正确吗</a></td>
+                    <td>fucking-java-concurrency/WrongCounterDemo</td>
+                    <td>volatile原子性误区</td>
+                    <td>⭐⭐</td>
+                    <td class="status" data-q="03"></td>
+                </tr>
+                <tr>
+                    <td>04</td>
+                    <td><a href="#ex-04">信号变量为什么没生效</a></td>
+                    <td>fucking-java-concurrency/NoPublishDemo</td>
+                    <td>可见性、JIT优化</td>
+                    <td>⭐⭐</td>
+                    <td class="status" data-q="04"></td>
+                </tr>
+                <tr>
+                    <td>05</td>
+                    <td><a href="#ex-05">对称加锁引发的死锁</a></td>
+                    <td>fucking-java-concurrency/SymmetricLockDeadlockDemo</td>
+                    <td>死锁、锁顺序</td>
+                    <td>⭐⭐⭐</td>
+                    <td class="status" data-q="05"></td>
+                </tr>
+                <tr style="border-top: 3px solid #f39c12;">
+                    <td colspan="6" style="font-size:12px; color:#7d6608; background:#fef9e7; font-style:italic;">↓ B类：业务场景代码优化题（面试场景题）</td>
+                </tr>
+                <tr>
+                    <td>06</td>
+                    <td><a href="#ex-06">秒杀库存扣减的竞态条件</a></td>
+                    <td>面试场景题</td>
+                    <td>check-then-act、原子扣减</td>
+                    <td>⭐⭐⭐</td>
+                    <td class="status" data-q="06"></td>
+                </tr>
+                <tr>
+                    <td>07</td>
+                    <td><a href="#ex-07">支付回调重复处理</a></td>
+                    <td>面试场景题</td>
+                    <td>幂等性、事务、分布式锁</td>
+                    <td>⭐⭐⭐</td>
+                    <td class="status" data-q="07"></td>
+                </tr>
+                <tr>
+                    <td>08</td>
+                    <td><a href="#ex-08">MQ消费：重复消费与顺序问题</a></td>
+                    <td>面试场景题</td>
+                    <td>幂等、顺序消费、异常重试</td>
+                    <td>⭐⭐⭐</td>
+                    <td class="status" data-q="08"></td>
+                </tr>
+                <tr>
+                    <td>09</td>
+                    <td><a href="#ex-09">缓存击穿：热点key过期</a></td>
+                    <td>面试场景题</td>
+                    <td>缓存击穿/穿透/雪崩</td>
+                    <td>⭐⭐</td>
+                    <td class="status" data-q="09"></td>
+                </tr>
+                <tr>
+                    <td>10</td>
+                    <td><a href="#ex-10">Redis分布式锁的5个坑</a></td>
+                    <td>面试场景题</td>
+                    <td>SETNX非原子、误删锁、锁续期</td>
+                    <td>⭐⭐⭐</td>
+                    <td class="status" data-q="10"></td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="agent-tip">
+            <strong>🤖 Agent提示：</strong>后续AI出题前只需读取本页源码顶部的「AGENT 出题索引」注释，即可了解已出题目与待出题方向，无需通读全文。
+        </div>
+    </div>
+
+    <!-- ==================== 题目 01 ==================== -->
+    <div class="card section" id="ex-01">
+        <div class="section-header c-blue">
+            <h2>题目 01：双重检查锁定的隐患</h2>
+            <div class="meta">
+                <span>来源：《Java并发编程的艺术》P137</span>
+                <span>知识点：重排序、volatile、DCL</span>
+                <span>难度：⭐⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>public class DoubleCheckedLocking {
+    private static Instance instance;
+
+    public static Instance getInstance() {
+        if (instance == null) {                          // 4: 第一次检查
+            synchronized (DoubleCheckedLocking.class) {  // 5: 加锁
+                if (instance == null)                    // 6: 第二次检查
+                    instance = new Instance();           // 7: 问题的根源
+            }
+        }
+        return instance;
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>这段代码已经有"双重检查 + 锁保护"，为什么它仍然是<strong>错误的</strong>？</li>
+                <li>请描述在什么时序下，线程会拿到一个<strong>未完全初始化</strong>的对象？（提示：第7行不是原子操作）</li>
+                <li>请写出至少一种正确的修复方式。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-01" placeholder="在这里输入你的分析：问题根源是什么？什么时序会出错？怎么修？"></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('01')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('01')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('01')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-01"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-01">
+            <h4>问题1：为什么是错的</h4>
+            <p>根源在第7行 <code>instance = new Instance()</code> 不是原子操作，可分解为三步：</p>
+            <ol>
+                <li>分配对象内存空间</li>
+                <li>初始化对象（调用构造方法）</li>
+                <li>把 instance 引用指向该内存地址</li>
+            </ol>
+            <p>步骤2和3可能被编译器/处理器<strong>重排序</strong>（3先于2执行）。</p>
+            <h4>问题2：出错时序</h4>
+            <p>线程A执行第7行，发生重排序，先执行了步骤3（引用已赋值）但步骤2（初始化）还没完成；此时线程B执行到第4行第一次检查，看到 instance 不为 null，直接返回——拿到的是<strong>还没有初始化完成的对象</strong>。</p>
+            <h4>问题3：修复方式</h4>
+            <p><strong>方式一：volatile 禁止重排序（JDK 5+）</strong></p>
+            <div class="code-block">
+<pre>public class SafeDoubleCheckedLocking {
+    private <span class="highlight">volatile</span> static Instance instance;  // 关键改动
+
+    public static Instance getInstance() {
+        if (instance == null) {
+            synchronized (SafeDoubleCheckedLocking.class) {
+                if (instance == null)
+                    instance = new Instance();
+            }
+        }
+        return instance;
+    }
+}</pre>
+            </div>
+            <p><strong>方式二：静态内部类（类初始化锁，推荐）</strong></p>
+            <div class="code-block">
+<pre>public class InstanceFactory {
+    private static class InstanceHolder {
+        public static Instance instance = new Instance();
+    }
+    public static Instance getInstance() {
+        return InstanceHolder.instance;  // 首次访问触发类初始化，JVM加锁保证线程安全
+    }
+}</pre>
+            </div>
+            <div class="source-note">📚 《Java并发编程的艺术》P136-142，3.8节。volatile方案依赖JSR-133内存模型增强，需JDK 5+。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 02 ==================== -->
+    <div class="card section" id="ex-02">
+        <div class="section-header c-purple">
+            <h2>题目 02：延迟初始化的线程安全问题</h2>
+            <div class="meta">
+                <span>来源：《Java并发编程的艺术》P136</span>
+                <span>知识点：竞态条件、可见性</span>
+                <span>难度：⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>public class UnsafeLazyInitialization {
+    private static Instance instance;
+
+    public static Instance getInstance() {
+        <span class="danger">if (instance == null)</span>          // 1: A线程执行
+            <span class="danger">instance = new Instance();</span> // 2: B线程也可能同时执行
+        return instance;
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>什么时序下单例会被破坏（返回两个不同实例）？</li>
+                <li>除了返回不同实例，这段代码还有什么更隐蔽的风险？（提示：instance 不是 volatile）</li>
+                <li>写出至少两种修复方案，并比较优缺点。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-02" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('02')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('02')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('02')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-02"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-02">
+            <h4>问题1：单例被破坏的时序</h4>
+            <p>线程A执行到第1行判断 instance == null 为 true，还没执行第2行；线程B此时也执行第1行，同样判断为 true。之后两个线程各自执行第2行，各创建一个对象——返回了两个不同的实例。</p>
+            <h4>问题2：更隐蔽的风险</h4>
+            <p>instance 不是 volatile，存在<strong>可见性</strong>问题：即使线程A已创建实例，线程B可能仍读到 null（旧值）；也可能读到引用但对象尚未初始化完成（配合重排序）。</p>
+            <h4>问题3：修复方案对比</h4>
+            <p><strong>方案一：同步方法</strong> —— 简单安全，但每次调用都加锁，高频调用性能差。</p>
+            <div class="code-block">
+<pre>public synchronized static Instance getInstance() {
+    if (instance == null) instance = new Instance();
+    return instance;
+}</pre>
+            </div>
+            <p><strong>方案二：静态内部类（推荐）</strong> —— 利用JVM类初始化锁，线程安全 + 懒加载 + 无同步开销。</p>
+            <div class="code-block">
+<pre>public class InstanceFactory {
+    private static class InstanceHolder {
+        public static Instance instance = new Instance();
+    }
+    public static Instance getInstance() {
+        return InstanceHolder.instance;
+    }
+}</pre>
+            </div>
+            <p><strong>方案三：volatile + DCL</strong> —— 第一次创建后无锁开销，代码较复杂，需JDK 5+。</p>
+            <div class="source-note">📚 《Java并发编程的艺术》P136，3.8.1节。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 03 ==================== -->
+    <div class="card section" id="ex-03">
+        <div class="section-header c-red">
+            <h2>题目 03：volatile能保证计数正确吗</h2>
+            <div class="meta">
+                <span>来源：fucking-java-concurrency/WrongCounterDemo</span>
+                <span>知识点：volatile原子性误区</span>
+                <span>难度：⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="run-box">
+            💡 可运行复现：在 fucking-java-concurrency 目录执行
+            <code>./mvnw compile exec:java -Dexec.mainClass=fucking.concurrency.demo.WrongCounterDemo</code>
+        </div>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>public class WrongCounterDemo {
+    private static final int INC_COUNT = 100000000;
+
+    private <span class="highlight">volatile</span> int counter = 0;  // 已经加了volatile
+
+    public static void main(String[] args) throws Exception {
+        WrongCounterDemo demo = new WrongCounterDemo();
+
+        Thread thread1 = new Thread(demo.getConcurrencyCheckTask());
+        thread1.start();
+        Thread thread2 = new Thread(demo.getConcurrencyCheckTask());
+        thread2.start();
+
+        thread1.join();
+        thread2.join();
+
+        int actualCounter = demo.counter;
+        int expectedCount = INC_COUNT * 2;
+        if (actualCounter != expectedCount) {
+            System.err.printf("Got wrong count! actual %s, expected: %s.%n",
+                    actualCounter, expectedCount);
+        } else {
+            System.out.println("Got right count!");
+        }
+    }
+
+    private class ConcurrencyCheckTask implements Runnable {
+        @Override
+        public void run() {
+            for (int i = 0; i &lt; INC_COUNT; ++i) {
+                <span class="danger">++counter;</span>  // 问题在这里
+            }
+        }
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>counter 已经是 volatile 了，为什么最终结果几乎必然<strong>小于</strong>期望值？</li>
+                <li>volatile 能保证什么、不能保证什么？</li>
+                <li>写出修复方案，并说明它为什么有效。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-03" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('03')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('03')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('03')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-03"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-03">
+            <h4>问题1：volatile为什么救不了 ++counter</h4>
+            <p><code>++counter</code> 是"读-改-写"三步的<strong>复合操作</strong>：读counter → 加1 → 写回。两个线程可能同时读到相同的旧值，各自加1后先后写回——其中一次更新被覆盖丢失。volatile只保证每次读到的都是最新值，但<strong>读和写之间</strong>的时间窗口它管不了。</p>
+            <h4>问题2：volatile的边界</h4>
+            <ul>
+                <li>能保证：<strong>可见性</strong>（写后其他线程立即可见）、<strong>有序性</strong>（禁止特定重排序）</li>
+                <li>不能保证：<strong>原子性</strong>（复合操作依然会出问题）</li>
+            </ul>
+            <h4>问题3：修复方案</h4>
+            <p><strong>方案一：AtomicInteger（推荐，CAS无锁）</strong></p>
+            <div class="code-block">
+<pre>private final AtomicInteger counter = new AtomicInteger(0);
+// 循环内改为：
+counter.incrementAndGet();  // 硬件级CAS保证原子性</pre>
+            </div>
+            <p><strong>方案二：synchronized</strong></p>
+            <div class="code-block">
+<pre>private int counter = 0;
+public synchronized void increment() { counter++; }</pre>
+            </div>
+            <p>高竞争下 LongAdder 性能更好（分段累加），-counter 场景可用 <code>LongAdder</code>。</p>
+            <div class="source-note">📚 参考来源：fucking-java-concurrency/WrongCounterDemo。面试高频误区："加了volatile就线程安全"。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 04 ==================== -->
+    <div class="card section" id="ex-04">
+        <div class="section-header c-orange">
+            <h2>题目 04：信号变量为什么没生效</h2>
+            <div class="meta">
+                <span>来源：fucking-java-concurrency/NoPublishDemo</span>
+                <span>知识点：可见性、JIT优化</span>
+                <span>难度：⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="run-box">
+            💡 可运行复现：在 fucking-java-concurrency 目录执行
+            <code>./mvnw compile exec:java -Dexec.mainClass=fucking.concurrency.demo.NoPublishDemo</code>
+        </div>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>public class NoPublishDemo {
+    <span class="danger">boolean stop = false;</span>  // 普通变量，非volatile
+
+    public static void main(String[] args) throws Exception {
+        NoPublishDemo demo = new NoPublishDemo();
+
+        Thread thread = new Thread(demo.getConcurrencyCheckTask());
+        thread.start();
+
+        Thread.sleep(1000);
+        System.out.println("Set stop to true in main!");
+        demo.stop = true;      // 主线程修改信号
+        System.out.println("Exit main.");  // main退出了，但子线程还在跑
+    }
+
+    private class ConcurrencyCheckTask implements Runnable {
+        @Override
+        public void run() {
+            System.out.println("ConcurrencyCheckTask started!");
+            while (!stop) {
+                // 主线程已把stop改为true，但这个循环几乎永远退不出去
+            }
+            System.out.println("ConcurrencyCheckTask stopped!");
+        }
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>为什么主线程已经写入 stop = true，子线程却可能<strong>永远看不到</strong>？</li>
+                <li>JIT编译器可能对这个空循环做什么"坏事"，让问题更必然化？</li>
+                <li>写出修复代码，并说明volatile在这里保证了什么。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-04" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('04')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('04')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('04')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-04"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-04">
+            <h4>问题1：为什么看不到</h4>
+            <p>stop 是普通变量，JMM允许线程把它缓存在工作内存（寄存器/CPU缓存）中。子线程每次循环读的可能一直是自己缓存里的旧值 false，主线程写入主内存的新值对它不可见。</p>
+            <h4>问题2：JIT的"补刀"</h4>
+            <p>JIT发现循环体是空的、stop 在循环中没人改，可能做<strong>循环条件外提</strong>（hoisting）：把 <code>while (!stop)</code> 优化成 <code>if (!stop) while(true){}</code>——只读一次，之后永远在空转。这就是为什么实践中这个bug"必然复现"。</p>
+            <h4>问题3：修复</h4>
+            <div class="code-block">
+<pre><span class="highlight">volatile</span> boolean stop = false;</pre>
+            </div>
+            <p>volatile保证：每次读都从主内存刷新、每次写立即刷回主内存、禁止相关的指令重排序——子线程必然能看到主线程的写入。</p>
+            <div class="source-note">📚 参考来源：fucking-java-concurrency/NoPublishDemo。volatile最典型的用途：状态标志位。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 05 ==================== -->
+    <div class="card section" id="ex-05">
+        <div class="section-header c-teal">
+            <h2>题目 05：对称加锁引发的死锁</h2>
+            <div class="meta">
+                <span>来源：fucking-java-concurrency/SymmetricLockDeadlockDemo</span>
+                <span>知识点：死锁、锁顺序</span>
+                <span>难度：⭐⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="run-box">
+            💡 可运行复现：在 fucking-java-concurrency 目录执行
+            <code>./mvnw compile exec:java -Dexec.mainClass=fucking.concurrency.demo.SymmetricLockDeadlockDemo</code><br>
+            程序卡住后可用 <code>jstack &lt;pid&gt;</code> 查看死锁报告
+        </div>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>public class SymmetricLockDeadlockDemo {
+    static final Object lock1 = new Object();
+    static final Object lock2 = new Object();
+
+    public static void main(String[] args) throws Exception {
+        new Thread(new Task1()).start();
+        new Thread(new Task2()).start();
+    }
+
+    private static class Task1 implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                synchronized (<span class="danger">lock1</span>) {      // 先拿lock1
+                    synchronized (<span class="danger">lock2</span>) {  // 再拿lock2
+                        System.out.println("Hello1");
+                    }
+                }
+            }
+        }
+    }
+
+    private static class Task2 implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                synchronized (<span class="danger">lock2</span>) {      // 先拿lock2
+                    synchronized (<span class="danger">lock1</span>) {  // 再拿lock1
+                        System.out.println("Hello2");
+                    }
+                }
+            }
+        }
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>描述死锁发生的具体时序。</li>
+                <li>死锁的四个必要条件是什么？这段代码各满足了哪条？</li>
+                <li>写出至少两种避免方案，并说明分别破坏了哪个条件。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-05" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('05')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('05')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('05')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-05"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-05">
+            <h4>问题1：死锁时序</h4>
+            <ol>
+                <li>线程1拿到 lock1，正准备拿 lock2</li>
+                <li>线程2拿到 lock2，正准备拿 lock1</li>
+                <li>线程1等线程2释放lock2，线程2等线程1释放lock1 → 互相等待，永久阻塞</li>
+            </ol>
+            <h4>问题2：四个必要条件</h4>
+            <ul>
+                <li><strong>互斥</strong>：锁同一时刻只能被一个线程持有 ✅</li>
+                <li><strong>占有并等待</strong>：拿着lock1的同时去等lock2 ✅</li>
+                <li><strong>不可剥夺</strong>：synchronized只能由持有者主动释放 ✅</li>
+                <li><strong>循环等待</strong>：1等2、2等1，形成环路 ✅</li>
+            </ul>
+            <h4>问题3：避免方案</h4>
+            <p><strong>方案一：全局固定加锁顺序</strong>（破坏循环等待）—— 所有线程都先拿lock1再拿lock2：</p>
+            <div class="code-block">
+<pre>// Task1 和 Task2 统一改为：
+synchronized (lock1) {
+    synchronized (lock2) { ... }
+}</pre>
+            </div>
+            <p>复杂场景可按对象的 identityHashCode 排序决定先后。</p>
+            <p><strong>方案二：tryLock + 超时回退</strong>（破坏占有并等待）—— 用 ReentrantLock.tryLock()，拿不到第二把锁就释放已持有的锁并重试：</p>
+            <div class="code-block">
+<pre>while (true) {
+    if (lock1.tryLock(1, TimeUnit.SECONDS)) {
+        try {
+            if (lock2.tryLock(1, TimeUnit.SECONDS)) {
+                try { /* 业务 */ } finally { lock2.unlock(); }
+            }
+        } finally { lock1.unlock(); }
+    }
+}</pre>
+            </div>
+            <div class="source-note">📚 参考来源：fucking-java-concurrency/SymmetricLockDeadlockDemo。面试常考：死锁四条件 + 如何破坏 + jstack排查。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== B类分隔标题 ==================== -->
+    <div class="card section" style="text-align:center; border-top: 4px solid #f39c12;">
+        <h2 style="color:#f39c12; font-size:22px;">🔨 B类：业务场景代码优化题</h2>
+        <p style="color:#7d6608; font-size:14px;">以下题目模拟真实面试场景：给一段业务代码，你来找问题并给出优化方案。审题时按6维度框架逐一过。</p>
+    </div>
+
+    <!-- ==================== 题目 06 ==================== -->
+    <div class="card section" id="ex-06">
+        <div class="section-header" style="background:#c0392b;">
+            <h2>题目 06：秒杀库存扣减的竞态条件</h2>
+            <div class="meta">
+                <span>类型：B类 业务场景</span>
+                <span>知识点：check-then-act、原子扣减</span>
+                <span>难度：⭐⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 场景描述</div>
+        <p style="font-size:14px; margin-bottom:10px;">秒杀活动，用户下单扣减库存。面试官给了下面这段扣库存代码，问你有没有问题。</p>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>public class StockService {
+
+    /**
+     * 扣减库存
+     * @param itemId 商品ID
+     * @param qty    扣减数量
+     * @return true=成功 false=库存不足
+     */
+    public boolean deductStock(Long itemId, int qty) {
+        // 1. 查询当前库存
+        Integer stock = stockMapper.getStock(itemId);
+
+        // 2. 判断库存是否充足
+        if (stock &gt;= qty) {
+            // 3. 扣减库存
+            <span class="danger">stockMapper.updateStock(itemId, stock - qty);</span>
+            return true;
+        }
+        return false;
+    }
+}
+
+// Mapper:
+// @Select("SELECT stock FROM item_stock WHERE item_id = #{itemId}")
+// Integer getStock(Long itemId);
+//
+// @Update("UPDATE item_stock SET stock = #{stock} WHERE item_id = #{itemId}")
+// int updateStock(Long itemId, int stock);</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>这段代码在<strong>高并发</strong>下会发生什么？请描述具体的出错时序。</li>
+                <li>这种"先查后扣"的模式有哪几个维度的问题？</li>
+                <li>请写出至少两种修复方案，并比较它们在<strong>秒杀场景</strong>下的优缺点。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-06" placeholder="在这里输入你的分析：并发会怎样？有哪几个维度的问题？怎么修？"></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('06')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('06')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('06')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-06"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-06">
+            <h4>问题1：高并发下会怎样</h4>
+            <p>经典的 <strong>check-then-act 竞态条件</strong>：</p>
+            <ol>
+                <li>线程A查询库存=10，判断 10&gt;=1，准备扣减</li>
+                <li>线程B也查询库存=10（还没被A扣减），判断 10&gt;=1</li>
+                <li>线程A执行 updateStock(itemId, 10-1=9)</li>
+                <li>线程B执行 updateStock(itemId, 10-1=9) —— 库存被覆盖写回9，而不是8</li>
+            </ol>
+            <p>结果：卖了2件但库存只减了1，<strong>超卖</strong>。</p>
+
+            <h4>问题2：6维度分析</h4>
+            <ul>
+                <li><strong>并发安全</strong>：check-then-act 不原子，查询和更新之间有时间窗口 ✅ 核心问题</li>
+                <li><strong>性能</strong>：先查后扣 = 2次DB往返，可以合并为1次条件UPDATE</li>
+                <li><strong>幂等性</strong>：如果用户重复提交订单，没有幂等保护会重复扣减</li>
+                <li><strong>事务一致性</strong>：方法没有 @Transactional，扣减和订单创建可能不在同一事务</li>
+            </ul>
+
+            <h4>问题3：修复方案</h4>
+            <p><strong>方案一：条件原子UPDATE（最推荐，简单有效）</strong></p>
+            <div class="code-block">
+<pre>public boolean deductStock(Long itemId, int qty) {
+    // 一行搞定：数据库内部"加行锁→判断→更新"是原子的
+    int rows = stockMapper.decreaseStock(itemId, qty);
+    return rows &gt; 0;  // 0行=库存不足
+}
+
+// @Update("UPDATE item_stock SET stock = stock - #{qty} " +
+//         "WHERE item_id = #{itemId} AND stock &gt;= #{qty}")
+// int decreaseStock(Long itemId, int qty);</pre>
+            </div>
+            <p>优点：1次DB往返、原子操作、无竞态；缺点：高并发下行锁竞争激烈（热点行）。</p>
+
+            <p><strong>方案二：Redis预扣 + 异步落库（秒杀场景推荐）</strong></p>
+            <div class="code-block">
+<pre>// 1. 活动开始前把库存预热到Redis
+//    SET stock:itemId 1000
+
+// 2. 收到请求时Redis原子扣减
+Long remaining = redisTemplate.opsForValue().decrement("stock:" + itemId, qty);
+if (remaining != null && remaining &gt;= 0) {
+    // 3. 扣减成功，发MQ异步落库
+    mqTemplate.send("stock-deduct", new StockDeductMsg(itemId, qty));
+    return true;
+} else {
+    // 库存不足，回补
+    redisTemplate.opsForValue().increment("stock:" + itemId, qty);
+    return false;
+}</pre>
+            </div>
+            <p>优点：Redis单线程无竞态、QPS高、DB压力小；缺点：引入Redis+MQ复杂度、需处理Redis和DB最终一致性。</p>
+
+            <div class="source-note">📚 面试高频场景。核心思路：用数据库条件UPDATE替代"先查后扣"，秒杀级用Redis预扣。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 07 ==================== -->
+    <div class="card section" id="ex-07">
+        <div class="section-header" style="background:#8e44ad;">
+            <h2>题目 07：支付回调重复处理</h2>
+            <div class="meta">
+                <span>类型：B类 业务场景</span>
+                <span>知识点：幂等性、事务、分布式锁</span>
+                <span>难度：⭐⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 场景描述</div>
+        <p style="font-size:14px; margin-bottom:10px;">第三方支付平台回调通知支付结果，后端处理回调。支付平台会重试回调（3次），需要保证不重复处理。</p>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>@Service
+public class PayCallbackService {
+
+    @Resource
+    private OrderMapper orderMapper;
+    @Resource
+    private AccountMapper accountMapper;
+
+    /**
+     * 处理支付回调
+     * @param orderId    订单ID
+     * @param amount     支付金额
+     * @param callbackId 回调唯一标识（支付平台提供）
+     */
+    public void handleCallback(String orderId, BigDecimal amount, String callbackId) {
+        // 1. 查订单状态
+        Order order = orderMapper.findById(orderId);
+
+        // 2. 如果未支付，执行扣款+标记已付
+        if ("UNPAID".equals(order.getStatus())) {
+            <span class="danger">accountMapper.deductBalance(order.getUserId(), amount);</span>
+            <span class="danger">orderMapper.updateStatus(orderId, "PAID");</span>
+        }
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>支付平台重试回调时，这段代码会发生什么？请描述具体时序。</li>
+                <li>这段代码按6维度框架分析，有多少个问题？</li>
+                <li>请写出修复后的完整代码（要求同时解决幂等、事务、并发问题）。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-07" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('07')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('07')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('07')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-07"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-07">
+            <h4>问题1：重试时会发生什么</h4>
+            <p>支付平台重试3次回调：</p>
+            <ol>
+                <li>回调1到达，查到 UNPAID，执行扣款100元，标记 PAID</li>
+                <li>回调2到达（重试），查到 PAID（如果回调1已提交），跳过 ✅</li>
+                <li><strong>但如果回调2在回调1的事务提交前到达</strong>：查到还是 UNPAID，再次扣款100元 + 标记 PAID</li>
+            </ol>
+            <p>结果：用户被<strong>重复扣款</strong>。这就是 check-then-act 在并发下的竞态。</p>
+
+            <h4>问题2：6维度分析</h4>
+            <ul>
+                <li><strong>并发安全</strong>：check-then-act 非原子，两个回调同时到达会都读到 UNPAID ✅ 核心问题</li>
+                <li><strong>事务一致性</strong>：deductBalance 和 updateStatus 不在 @Transactional 内，扣款成功但标记失败会导致数据不一致 ✅</li>
+                <li><strong>幂等性</strong>：没有任何幂等设计——没用 callbackId 做去重，没用唯一约束 ✅ 核心问题</li>
+                <li><strong>异常处理</strong>：扣款成功后标记失败，没有补偿机制 ✅</li>
+                <li><strong>性能</strong>：先查订单再操作，2次DB往返（可以接受，非主要问题）</li>
+            </ul>
+
+            <h4>问题3：修复代码</h4>
+            <div class="code-block">
+<pre>@Service
+public class PayCallbackServiceFixed {
+
+    @Resource private OrderMapper orderMapper;
+    @Resource private AccountMapper accountMapper;
+    @Resource private StringRedisTemplate redisTemplate;
+
+    private static final String LOCK_PREFIX = "pay:lock:";
+
+    public void handleCallback(String orderId, BigDecimal amount, String callbackId) {
+        String lockKey = LOCK_PREFIX + orderId;
+
+        // 1. 分布式锁：防止同一订单的回调并发处理（锁粒度=orderId）
+        Boolean locked = redisTemplate.opsForValue()
+                .setIfAbsent(lockKey, callbackId, 30, TimeUnit.SECONDS);
+        if (locked == null || !locked) {
+            return;  // 其他线程在处理，直接返回（支付平台会重试）
+        }
+
+        try {
+            // 2. 幂等表去重：用callbackId做唯一约束
+            try {
+                callbackMapper.insert(callbackId, orderId);  // 唯一索引，重复插入抛异常
+            } catch (DuplicateKeyException e) {
+                return;  // 已处理过，幂等返回
+            }
+
+            // 3. 状态机CAS更新：UNPAID → PAID（原子操作，避免check-then-act）
+            int rows = orderMapper.casUpdateStatus(orderId, "UNPAID", "PAID");
+            if (rows == 0) {
+                return;  // 状态已改（已被处理过），幂等返回
+            }
+
+            // 4. 扣款 + 标记在同一事务内
+            doPayInTransaction(orderId, amount);
+
+        } finally {
+            // 5. 释放锁：Lua脚本保证只删自己的锁
+            releaseLock(lockKey, callbackId);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void doPayInTransaction(String orderId, BigDecimal amount) {
+        Order order = orderMapper.findById(orderId);
+        accountMapper.deductBalance(order.getUserId(), amount);
+        // 插入流水记录...
+    }
+}
+
+// CAS更新：WHERE条件带旧状态，保证原子性
+// @Update("UPDATE orders SET status = #{newStatus} " +
+//         "WHERE id = #{orderId} AND status = #{oldStatus}")
+// int casUpdateStatus(String orderId, String oldStatus, String newStatus);</pre>
+            </div>
+            <p>三层防护：① 分布式锁防并发 ② 幂等表防重试 ③ 状态机CAS防check-then-act。三者缺一不可。</p>
+            <div class="source-note">📚 面试场景题高频题。核心考点：幂等设计三层防护 + 事务边界 + 分布式锁。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 08 ==================== -->
+    <div class="card section" id="ex-08">
+        <div class="section-header" style="background:#2980b9;">
+            <h2>题目 08：MQ消费：重复消费与顺序问题</h2>
+            <div class="meta">
+                <span>类型：B类 业务场景</span>
+                <span>知识点：幂等、顺序消费、异常重试</span>
+                <span>难度：⭐⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 场景描述</div>
+        <p style="font-size:14px; margin-bottom:10px;">订单服务通过RocketMQ发送订单状态变更消息，下游消费端根据消息更新订单。面试官给了下面这段消费代码。</p>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>@Component
+@RocketMQMessageListener(topic = "order-status-change")
+public class OrderStatusConsumer implements RocketMQListener&lt;OrderMessage&gt; {
+
+    @Resource
+    private OrderMapper orderMapper;
+
+    @Override
+    public void onMessage(OrderMessage message) {
+        // 直接根据消息内容更新订单状态
+        if ("CREATE".equals(message.getType())) {
+            <span class="danger">orderMapper.insert(message.getOrder());</span>
+        } else if ("PAY".equals(message.getType())) {
+            <span class="danger">orderMapper.updateStatus(message.getOrderId(), "PAID");</span>
+        } else if ("CANCEL".equals(message.getType())) {
+            orderMapper.updateStatus(message.getOrderId(), "CANCELLED");
+        }
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>MQ保证<strong>At-Least-Once</strong>语义（至少投递一次），重复消费时会怎样？</li>
+                <li>消息不保证严格顺序时，<code>CREATE</code> 和 <code>PAY</code> 乱序到达会发生什么？</li>
+                <li>如果 <code>orderMapper.insert</code> 抛异常，默认行为是什么？有什么风险？</li>
+                <li>请写出修复后的代码，要求同时解决幂等 + 顺序 + 异常处理。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-08" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('08')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('08')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('08')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-08"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-08">
+            <h4>问题1：重复消费</h4>
+            <p>MQ不保证Exactly-Once。同一条 PAY 消息可能投递2次。第二次执行 <code>updateStatus(orderId, "PAID")</code> 不会出错，但如果 CREATE 消息重复消费，<code>insert</code> 会插入重复数据（如果没有唯一约束）。</p>
+
+            <h4>问题2：乱序到达</h4>
+            <p>如果 PAY 消息先于 CREATE 到达：<code>updateStatus</code> 找不到订单（还没 insert），影响行数为0，但代码没有检查——状态更新"丢失"。之后 CREATE 到达，订单被插入但状态是初始值，PAY 的更新已经丢了。</p>
+            <p>更糟的情况：CANCEL 在 PAY 之前到达，把状态改成 CANCELLED，然后 PAY 到达又改成 PAID——已取消的订单变成已支付。</p>
+
+            <h4>问题3：异常风险</h4>
+            <p><code>insert</code> 抛异常 → RocketMQ 默认重试16次 → 每次都失败 → 达到最大重试后进入死信队列（DLQ）。但如果异常是"插入重复"（唯一约束冲突），那重试只会不断失败，实际上业务是成功的（数据已存在）——<strong>把幂等失败当成了系统异常</strong>。</p>
+
+            <h4>问题4：修复代码</h4>
+            <div class="code-block">
+<pre>@Component
+@RocketMQMessageListener(
+    topic = "order-status-change",
+    consumerGroup = "order-status-consumer",
+    // 同一orderId的消息路由到同一队列，保证顺序消费
+    selectorExpression = "CREATE || PAY || CANCEL"
+)
+public class OrderStatusConsumerFixed implements RocketMQListener&lt;OrderMessage&gt; {
+
+    @Resource private OrderMapper orderMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void onMessage(OrderMessage message) {
+        String orderId = message.getOrderId();
+
+        // 1. 幂等：用消息唯一ID做去重（防重复消费）
+        if (isProcessed(message.getMsgId())) {
+            return;  // 已处理，幂等返回
+        }
+
+        // 2. 状态机校验：只允许合法的状态流转
+        //    UNPAID → PAID（合法），CANCELLED → PAID（非法，拒绝）
+        Order order = orderMapper.findById(orderId);
+        if (order != null) {
+            if (!isValidTransition(order.getStatus(), message.getTargetStatus())) {
+                return;  // 非法状态流转，幂等返回（不抛异常，不重试）
+            }
+        }
+
+        // 3. 按消息类型处理
+        switch (message.getType()) {
+            case "CREATE":
+                // insert ignore 或 唯一约束兜底
+                try {
+                    orderMapper.insertOnDuplicateIgnore(message.getOrder());
+                } catch (DuplicateKeyException e) {
+                    return;  // 已存在，幂等返回
+                }
+                break;
+            case "PAY":
+                // CAS更新：只有当前状态是UNPAID才更新
+                int rows = orderMapper.casUpdateStatus(orderId, "UNPAID", "PAID");
+                if (rows == 0) return;  // 状态已变更，跳过
+                break;
+            case "CANCEL":
+                orderMapper.casUpdateStatus(orderId, "UNPAID", "CANCELLED");
+                break;
+        }
+
+        // 4. 记录消息已处理
+        markProcessed(message.getMsgId());
+    }
+
+    private boolean isValidTransition(String from, String to) {
+        // 状态机：定义合法流转
+        return ("UNPAID".equals(from) && "PAID".equals(to))
+            || ("UNPAID".equals(from) && "CANCELLED".equals(to));
+    }
+}</pre>
+            </div>
+            <p>核心思路：① 幂等表/messageId去重 ② 状态机校验防止乱序 ③ CAS更新保证原子性 ④ 幂等失败不抛异常（不触发重试）。</p>
+            <div class="source-note">📚 面试高频：MQ消费的三大坑——重复消费、乱序、异常重试。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 09 ==================== -->
+    <div class="card section" id="ex-09">
+        <div class="section-header" style="background:#d4a017;">
+            <h2>题目 09：缓存击穿：热点key过期</h2>
+            <div class="meta">
+                <span>类型：B类 业务场景</span>
+                <span>知识点：缓存击穿/穿透/雪崩</span>
+                <span>难度：⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 场景描述</div>
+        <p style="font-size:14px; margin-bottom:10px;">电商商品详情页，用户浏览商品时先查Redis缓存，没命中再查数据库。某热销商品缓存过期瞬间，大量请求同时打到数据库。</p>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>@Service
+public class ProductService {
+
+    @Resource
+    private ProductMapper productMapper;
+    @Resource
+    private StringRedisTemplate redisTemplate;
+
+    private static final String KEY_PREFIX = "product:";
+
+    public Product getProduct(Long productId) {
+        String key = KEY_PREFIX + productId;
+
+        // 1. 查缓存
+        Product product = (Product) redisTemplate.opsForValue().get(key);
+
+        // 2. 缓存未命中，查数据库
+        <span class="danger">if (product == null) {
+            product = productMapper.findById(productId);          // 1000个线程同时到这里
+            if (product != null) {
+                redisTemplate.opsForValue().set(key, product, 30, TimeUnit.MINUTES);
+            }
+        }</span>
+
+        return product;
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>热销商品的缓存过期的瞬间，会发生什么？请描述具体现象。</li>
+                <li>如果 <code>productMapper.findById</code> 返回 null（商品不存在），这段代码还有什么隐患？（提示：缓存穿透）</li>
+                <li>请写出修复代码，同时解决缓存击穿和缓存穿透。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-09" placeholder="在这里输入你的分析..."></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('09')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('09')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('09')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-09"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-09">
+            <h4>问题1：缓存击穿</h4>
+            <p>热销商品缓存过期的瞬间，1000个请求同时发现缓存miss，全部涌入数据库执行 <code>findById</code>。数据库瞬间负载飙升，可能被打挂。这就是<strong>缓存击穿</strong>——单个热点key过期导致大量请求穿透到DB。</p>
+
+            <h4>问题2：缓存穿透</h4>
+            <p>如果商品不存在，<code>findById</code> 返回 null，代码不会缓存任何值。攻击者可以不断请求不存在的商品ID，每次都打到数据库——<strong>缓存穿透</strong>。</p>
+
+            <h4>问题3：修复代码</h4>
+            <div class="code-block">
+<pre>@Service
+public class ProductServiceFixed {
+
+    @Resource private ProductMapper productMapper;
+    @Resource private StringRedisTemplate redisTemplate;
+
+    private static final String KEY_PREFIX = "product:";
+    private static final String EMPTY_FLAG = "NULL";  // 空值标记
+    private static final long LOCK_TIMEOUT = 5;       // 获取锁超时(秒)
+
+    public Product getProduct(Long productId) {
+        String key = KEY_PREFIX + productId;
+
+        // 1. 查缓存
+        String cached = redisTemplate.opsForValue().get(key);
+        if (cached != null) {
+            if (EMPTY_FLAG.equals(cached)) return null;  // 防穿透：空值缓存
+            return deserialize(cached);
+        }
+
+        // 2. 获取分布式锁（防击穿：只让一个线程去查DB）
+        String lockKey = "lock:" + key;
+        String lockValue = UUID.randomUUID().toString();
+        Boolean locked = redisTemplate.opsForValue()
+                .setIfAbsent(lockKey, lockValue, LOCK_TIMEOUT, TimeUnit.SECONDS);
+
+        if (locked != null && locked) {
+            try {
+                // 3. 双重检查：拿到锁后再查一次缓存（可能已被其他线程填充）
+                cached = redisTemplate.opsForValue().get(key);
+                if (cached != null) {
+                    return EMPTY_FLAG.equals(cached) ? null : deserialize(cached);
+                }
+
+                // 4. 查数据库
+                Product product = productMapper.findById(productId);
+
+                // 5. 缓存结果（含空值缓存，防穿透）
+                if (product != null) {
+                    // 随机过期时间，防雪崩
+                    int ttl = 25 + ThreadLocalRandom.current().nextInt(10);
+                    redisTemplate.opsForValue().set(key, serialize(product), ttl, TimeUnit.MINUTES);
+                } else {
+                    // 空值也缓存，但时间短（防穿透）
+                    redisTemplate.opsForValue().set(key, EMPTY_FLAG, 2, TimeUnit.MINUTES);
+                }
+                return product;
+            } finally {
+                // 6. Lua脚本释放锁（只删自己的）
+                releaseLock(lockKey, lockValue);
+            }
+        } else {
+            // 没拿到锁，短暂等待后重试读缓存
+            sleep(50);
+            return getProduct(productId);  // 递归重试
+        }
+    }
+}</pre>
+            </div>
+            <p>三个缓存问题的解决方案：</p>
+            <ul>
+                <li><strong>击穿</strong>（热点key过期）→ 分布式锁 + 双重检查，只让一个线程查DB</li>
+                <li><strong>穿透</strong>（查询不存在的key）→ 空值也缓存（短TTL），或布隆过滤器</li>
+                <li><strong>雪崩</strong>（大量key同时过期）→ 过期时间加随机值</li>
+            </ul>
+            <div class="source-note">📚 面试必考：缓存三大问题（击穿/穿透/雪崩）的识别与解决。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <!-- ==================== 题目 10 ==================== -->
+    <div class="card section" id="ex-10">
+        <div class="section-header" style="background:#c0392b;">
+            <h2>题目 10：Redis分布式锁的5个坑</h2>
+            <div class="meta">
+                <span>类型：B类 业务场景</span>
+                <span>知识点：SETNX非原子、误删锁、锁续期</span>
+                <span>难度：⭐⭐⭐</span>
+            </div>
+        </div>
+
+        <div class="block-title">📝 场景描述</div>
+        <p style="font-size:14px; margin-bottom:10px;">面试官让你手写一个Redis分布式锁。下面是候选人写的代码，面试官说有5个坑，你来找。</p>
+
+        <div class="block-title">📝 Bad Case 代码</div>
+        <div class="code-block">
+<pre>@Service
+public class RedisLockService {
+
+    @Resource
+    private StringRedisTemplate redisTemplate;
+
+    /**
+     * 加锁
+     * @param key    锁key
+     * @param expire 过期时间(秒)
+     */
+    public boolean tryLock(String key, long expire) {
+        String value = String.valueOf(System.currentTimeMillis());
+
+        // 坑1：SETNX + EXPIRE 非原子
+        <span class="danger">Boolean locked = redisTemplate.opsForValue().setIfAbsent(key, value);</span>
+        if (locked != null && locked) {
+            <span class="danger">redisTemplate.expire(key, expire, TimeUnit.SECONDS);</span>  // 如果这行之前crash？
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 释放锁
+     */
+    public void unlock(String key) {
+        // 坑2：直接DEL，可能删掉别人的锁
+        <span class="danger">redisTemplate.delete(key);</span>
+    }
+
+    /**
+     * 带锁执行业务
+     */
+    public boolean doWithLock(String key, long expire, Runnable business) {
+        if (!tryLock(key, expire)) {
+            return false;  // 坑3：没拿到锁直接返回，无重试
+        }
+
+        try {
+            <span class="danger">business.run();</span>  // 坑4：业务执行超过expire，锁已过期但还在跑
+                                          // 坑5：没有锁续期机制
+            return true;
+        } finally {
+            unlock(key);
+        }
+    }
+}</pre>
+        </div>
+
+        <div class="block-title">❓ 问题</div>
+        <div class="question-box">
+            <ol>
+                <li>坑1（SETNX+EXPIRE非原子）：在什么情况下会出问题？后果是什么？</li>
+                <li>坑2（误删锁）：描述"删掉别人的锁"的具体时序。为什么 <code>value</code> 用时间戳是错的？</li>
+                <li>坑4+5（锁过期+无续期）：业务执行时间超过锁的过期时间会怎样？</li>
+                <li>请写出修复后的完整代码，覆盖所有5个坑。</li>
+            </ol>
+        </div>
+
+        <div class="block-title">✍️ 你的答案</div>
+        <div class="answer-section">
+            <textarea id="answer-10" placeholder="在这里输入你的分析：5个坑分别是什么？怎么修？"></textarea>
+            <div class="btn-group">
+                <button class="btn-save" onclick="saveAnswer('10')">💾 保存答案</button>
+                <button class="btn-clear" onclick="clearAnswer('10')">🗑️ 清空</button>
+                <button class="btn-toggle" onclick="toggleAnswer('10')">👁️ 查看参考答案</button>
+            </div>
+            <div class="save-status" id="status-10"></div>
+        </div>
+
+        <div class="ref-answer" id="ref-10">
+            <h4>坑1：SETNX + EXPIRE 非原子</h4>
+            <p>线程执行 <code>setIfAbsent</code> 成功（锁已写入），但还没执行 <code>expire</code> 时进程crash。结果：锁没有过期时间，<strong>永久锁死</strong>，后续所有请求都拿不到锁。</p>
+            <p><strong>修复</strong>：用 <code>setIfAbsent(key, value, expire, TimeUnit)</code> 一条命令同时设置值和过期时间（Redis 2.6.12+支持）。</p>
+
+            <h4>坑2：误删锁 + value用时间戳</h4>
+            <p>时序：线程A拿到锁(value=A)，业务执行中锁过期 → 线程B拿到锁(value=B) → 线程A执行完毕调用 <code>delete(key)</code> → <strong>删掉了线程B的锁</strong> → 线程C又拿到锁，A和B同时执行。</p>
+            <p>value用时间戳是错的：时间戳可预测，其他线程可以猜出来。应该用 <code>UUID.randomUUID()</code>。</p>
+            <p><strong>修复</strong>：释放锁时先判断value是不是自己的（用Lua脚本保证"判断+删除"原子）：</p>
+            <div class="code-block">
+<pre>private static final String RELEASE_SCRIPT =
+    "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+    "  return redis.call('del', KEYS[1]) " +
+    "else return 0 end";
+
+public void unlock(String key, String value) {
+    redisTemplate.execute(
+        new DefaultRedisScript&lt;&gt;(RELEASE_SCRIPT, Long.class),
+        Collections.singletonList(key), value);
+}</pre>
+            </div>
+
+            <h4>坑4+5：锁过期 + 无续期</h4>
+            <p>线程A拿到锁(expire=10s)，但业务执行了15s。在第10s时锁已过期，线程B拿到锁开始执行。此时A和B都在执行——<strong>锁失效，并发安全被破坏</strong>。</p>
+            <p><strong>修复</strong>：看门狗(Watchdog)自动续期。启动一个后台线程，每隔 expire/3 时间检查锁是否还属于自己，如果是则延长过期时间。</p>
+
+            <h4>修复后完整代码</h4>
+            <div class="code-block">
+<pre>@Service
+public class RedisLockServiceFixed {
+
+    @Resource private StringRedisTemplate redisTemplate;
+    @Resource private ScheduledExecutorService scheduler;
+
+    private static final String RELEASE_SCRIPT =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+        "  return redis.call('del', KEYS[1]) else return 0 end";
+
+    private static final String RENEW_SCRIPT =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+        "  return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
+
+    public boolean tryLock(String key, String value, long expireSeconds) {
+        // 坑1修复：SET + EXPIRE 原子化
+        Boolean locked = redisTemplate.opsForValue()
+                .setIfAbsent(key, value, expireSeconds, TimeUnit.SECONDS);
+        return locked != null && locked;
+    }
+
+    public boolean doWithLock(String key, long expire, Supplier&lt;Boolean&gt; business) {
+        String value = UUID.randomUUID().toString();
+
+        // 坑3修复：自旋重试
+        int retry = 0;
+        while (!tryLock(key, value, expire)) {
+            if (++retry &gt; 3) return false;
+            sleep(100);
+        }
+
+        // 坑5修复：看门狗续期
+        ScheduledFuture&lt;?&gt; watchdog = startWatchdog(key, value, expire, scheduler);
+
+        try {
+            return business.get();
+        } finally {
+            watchdog.cancel(false);
+            // 坑2修复：Lua脚本原子释放
+            redisTemplate.execute(
+                new DefaultRedisScript&lt;&gt;(RELEASE_SCRIPT, Long.class),
+                Collections.singletonList(key), value);
+        }
+    }
+
+    private ScheduledFuture&lt;?&gt; startWatchdog(String key, String value, long expire,
+                                               ScheduledExecutorService scheduler) {
+        long renewInterval = TimeUnit.SECONDS.toMillis(expire) / 3;
+        return scheduler.scheduleAtFixedRate(() -> {
+            redisTemplate.execute(
+                new DefaultRedisScript&lt;&gt;(RENEW_SCRIPT, Long.class),
+                Collections.singletonList(key),
+                String.valueOf(TimeUnit.SECONDS.toMillis(expire)));
+        }, renewInterval, renewInterval, TimeUnit.MILLISECONDS);
+    }
+}</pre>
+            </div>
+            <p>5个坑总结：① SETNX+EXPIRE非原子 → 用setIfAbsent合并 ② 误删锁 → UUID+Lua释放 ③ 无重试 → 自旋 ④ 锁过期 → 看门狗续期 ⑤ 无续期机制 → 定时renew</p>
+            <p>生产推荐直接用 <strong>Redisson</strong>（RLock），以上所有坑都已内置解决。</p>
+            <div class="source-note">📚 面试高频：手写Redis分布式锁是经典考题，5个坑逐一追问是标准流程。</div>
+        </div>
+
+        <div class="back-toc"><a href="#top">← 返回目录</a></div>
+    </div>
+
+    <div class="site-footer">
+        共 10 题（A类5 + B类5） | 出题方法论见页面顶部 | 出题进度见源码顶部「AGENT 出题索引」
+    </div>
+</div>
+
+<script>
+    function saveAnswer(q) {
+        const val = document.getElementById('answer-' + q).value;
+        localStorage.setItem('exercise_' + q + '_answer', val);
+        showStatus(q, '✅ 已保存 (' + new Date().toLocaleString() + ')');
+        refreshTOCStatus();
+    }
+
+    function clearAnswer(q) {
+        if (!confirm('确定要清空第 ' + q + ' 题的答案吗？')) return;
+        document.getElementById('answer-' + q).value = '';
+        localStorage.removeItem('exercise_' + q + '_answer');
+        showStatus(q, '🗑️ 已清空');
+        refreshTOCStatus();
+    }
+
+    function showStatus(q, msg) {
+        document.getElementById('status-' + q).textContent = msg;
+    }
+
+    function toggleAnswer(q) {
+        const ref = document.getElementById('ref-' + q);
+        ref.classList.toggle('show');
+        const btn = event.target;
+        btn.textContent = ref.classList.contains('show') ? '🙈 隐藏参考答案' : '👁️ 查看参考答案';
+    }
+
+    function refreshTOCStatus() {
+        document.querySelectorAll('.status').forEach(cell => {
+            const q = cell.dataset.q;
+            const saved = localStorage.getItem('exercise_' + q + '_answer');
+            if (saved && saved.trim().length > 0) {
+                cell.innerHTML = '<span class="status-done">已作答 ✓</span>';
+            } else {
+                cell.innerHTML = '<span class="status-empty">未作答</span>';
+            }
+        });
+    }
+
+    // 页面打开时：加载已保存答案 + 刷新目录状态
+    window.onload = function () {
+        document.querySelectorAll('textarea[id^="answer-"]').forEach(ta => {
+            const q = ta.id.replace('answer-', '');
+            const saved = localStorage.getItem('exercise_' + q + '_answer');
+            if (saved) ta.value = saved;
+        });
+        refreshTOCStatus();
+    };
+</script>
+</body>
+</html>

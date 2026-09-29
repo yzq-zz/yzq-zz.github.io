@@ -8,13 +8,13 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: '首页', link: '/' },
-      { text: '并发编程练习题', link: '/concurrency-exercises.html' }
+      { text: '并发编程练习题', link: '/exercises/concurrency.html' }
     ],
     sidebar: [
       {
         text: '练习题',
         items: [
-          { text: '并发编程练习题', link: '/concurrency-exercises.html' }
+          { text: '并发编程练习题', link: '/exercises/concurrency.html' }
         ]
       }
       // 后续新增笔记分类，在这里加

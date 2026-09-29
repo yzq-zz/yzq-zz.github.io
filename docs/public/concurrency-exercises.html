@@ -1678,7 +1678,7 @@ public class RedisLockServiceFixed {
     #sync-bar a { font-size: 12px; color: #0969da; }
 </style>
 <div id="sync-bar">
-    <span id="sync-status">☁️ 云同步未配置</span>
+    <span id="sync-status" onclick="resetSync()" style="cursor:pointer;" title="点击清除本机Token并重新配置">☁️ 云同步未配置</span>
     <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" id="sync-help" style="display:none;">获取Token</a>
     <input type="password" id="sync-token" placeholder="粘贴 GitHub Token" style="display:none;">
     <button id="sync-config-btn" onclick="configSync()" style="display:none;">保存Token</button>
@@ -1746,6 +1746,14 @@ public class RedisLockServiceFixed {
     const TOKEN_KEY = 'gh_sync_token';
 
     function getToken() { return localStorage.getItem(TOKEN_KEY); }
+
+    // 状态文字可点击：清除本机 Token，重新弹出配置输入框
+    function resetSync() {
+        if (!getToken()) return;
+        if (!confirm('确定清除本机保存的 Token 并重新配置吗？')) return;
+        localStorage.removeItem(TOKEN_KEY);
+        initSyncBar();
+    }
 
     function setSyncStatus(msg) {
         document.getElementById('sync-status').textContent = msg;

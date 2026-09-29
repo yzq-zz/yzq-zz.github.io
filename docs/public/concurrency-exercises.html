@@ -262,7 +262,7 @@ B类待出：
     <div class="site-header">
         <h1>并发编程练习题集</h1>
         <p>来源：《Java并发编程的艺术》 + fucking-java-concurrency 开源仓库（本地路径：/Users/yzq/Desktop/学习资料/fucking-java-concurrency）</p>
-        <p>练习方法：先盲审代码找问题 → 在输入框写下分析并保存 → 对照参考答案。答案保存在浏览器本地（localStorage），可随时复制给AI批改。</p>
+        <p>练习方法：先盲审代码找问题 → 在输入框写下分析并保存 → 对照参考答案。答案保存在浏览器本地（localStorage），并自动同步到 GitHub 私有仓库，跨设备可用；可随时复制给AI批改。</p>
     </div>
 
     <!-- ==================== 出题方法论（Agent出题指南） ==================== -->
@@ -1657,20 +1657,51 @@ public class RedisLockServiceFixed {
     </div>
 </div>
 
+<!-- ==================== GitHub 云同步 ==================== -->
+<style>
+    #sync-bar {
+        position: fixed; bottom: 16px; right: 16px; z-index: 999;
+        display: flex; gap: 8px; align-items: center;
+        background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px;
+        padding: 8px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.12);
+        font-size: 13px; font-family: inherit;
+    }
+    #sync-bar button {
+        font-size: 12px; padding: 4px 10px; cursor: pointer;
+        border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa;
+    }
+    #sync-bar button:hover { background: #eef1f4; }
+    #sync-bar input {
+        font-size: 12px; padding: 4px 8px; width: 220px;
+        border: 1px solid #d0d7de; border-radius: 6px;
+    }
+    #sync-bar a { font-size: 12px; color: #0969da; }
+</style>
+<div id="sync-bar">
+    <span id="sync-status">☁️ 云同步未配置</span>
+    <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" id="sync-help" style="display:none;">获取Token</a>
+    <input type="password" id="sync-token" placeholder="粘贴 GitHub Token" style="display:none;">
+    <button id="sync-config-btn" onclick="configSync()" style="display:none;">保存Token</button>
+    <button id="sync-pull-btn" onclick="pullFromCloud()" style="display:none;">⟳ 拉取</button>
+    <button id="sync-push-btn" onclick="pushToCloud()" style="display:none;">↑ 推送</button>
+</div>
+
 <script>
     function saveAnswer(q) {
         const val = document.getElementById('answer-' + q).value;
         localStorage.setItem('exercise_' + q + '_answer', val);
         showStatus(q, '✅ 已保存 (' + new Date().toLocaleString() + ')');
         refreshTOCStatus();
+        scheduleSync();
     }
 
     function clearAnswer(q) {
         if (!confirm('确定要清空第 ' + q + ' 题的答案吗？')) return;
         document.getElementById('answer-' + q).value = '';
-        localStorage.removeItem('exercise_' + q + '_answer');
+        localStorage.setItem('exercise_' + q + '_answer', '');
         showStatus(q, '🗑️ 已清空');
         refreshTOCStatus();
+        scheduleSync();
     }
 
     function showStatus(q, msg) {
@@ -1696,7 +1727,7 @@ public class RedisLockServiceFixed {
         });
     }
 
-    // 页面打开时：加载已保存答案 + 刷新目录状态
+    // 页面打开时：加载已保存答案 + 刷新目录状态 + 初始化云同步
     window.onload = function () {
         document.querySelectorAll('textarea[id^="answer-"]').forEach(ta => {
             const q = ta.id.replace('answer-', '');
@@ -1704,7 +1735,125 @@ public class RedisLockServiceFixed {
             if (saved) ta.value = saved;
         });
         refreshTOCStatus();
+        initSyncBar();
+        if (getToken()) pullFromCloud();
     };
+
+    // ==================== GitHub 云同步逻辑 ====================
+    const GH_OWNER = 'yzq-zz';
+    const GH_REPO = 'notes-data';
+    const GH_PATH = 'concurrency-answers.json';
+    const TOKEN_KEY = 'gh_sync_token';
+
+    function getToken() { return localStorage.getItem(TOKEN_KEY); }
+
+    function setSyncStatus(msg) {
+        document.getElementById('sync-status').textContent = msg;
+    }
+
+    function configSync() {
+        const t = document.getElementById('sync-token').value.trim();
+        if (!t) { alert('请先粘贴 Token'); return; }
+        localStorage.setItem(TOKEN_KEY, t);
+        document.getElementById('sync-token').value = '';
+        initSyncBar();
+        pullFromCloud();
+    }
+
+    function initSyncBar() {
+        const has = !!getToken();
+        document.getElementById('sync-help').style.display = has ? 'none' : 'inline';
+        document.getElementById('sync-token').style.display = has ? 'none' : 'inline-block';
+        document.getElementById('sync-config-btn').style.display = has ? 'none' : 'inline-block';
+        document.getElementById('sync-pull-btn').style.display = has ? 'inline-block' : 'none';
+        document.getElementById('sync-push-btn').style.display = has ? 'inline-block' : 'none';
+        setSyncStatus(has ? '☁️ 云同步已就绪' : '☁️ 云同步未配置');
+    }
+
+    function ghHeaders() {
+        return {
+            'Authorization': 'Bearer ' + getToken(),
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        };
+    }
+
+    // 清空也存空串，保证"清空"动作能同步到其他设备
+    function collectLocalAnswers() {
+        const answers = {};
+        for (let i = 1; i <= 99; i++) {
+            const q = String(i).padStart(2, '0');
+            const v = localStorage.getItem('exercise_' + q + '_answer');
+            if (v !== null) answers['exercise_' + q + '_answer'] = v;
+        }
+        return answers;
+    }
+
+    function applyCloudAnswers(data) {
+        Object.keys(data.answers || {}).forEach(k => {
+            localStorage.setItem(k, data.answers[k]);
+            const q = k.replace('exercise_', '').replace('_answer', '');
+            const ta = document.getElementById('answer-' + q);
+            if (ta) ta.value = data.answers[k];
+        });
+        refreshTOCStatus();
+    }
+
+    let syncTimer = null;
+    // 保存/清空后 3 秒自动推送（合并连续操作，避免频繁请求）
+    function scheduleSync() {
+        if (!getToken()) return;
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(pushToCloud, 3000);
+    }
+
+    async function pullFromCloud() {
+        if (!getToken()) return;
+        setSyncStatus('☁️ 正在拉取云端答案...');
+        try {
+            const resp = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`, { headers: ghHeaders() });
+            if (resp.status === 404) { setSyncStatus('☁️ 云端还没有记录，保存答案后会自动创建'); return; }
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const j = await resp.json();
+            const data = JSON.parse(decodeURIComponent(escape(atob(j.content))));
+            const localTs = localStorage.getItem('sync_updated_at');
+            if (localTs && data.updated_at && new Date(localTs) >= new Date(data.updated_at)) {
+                setSyncStatus('☁️ 本地已是最新 (' + new Date(localTs).toLocaleString() + ')');
+                return;
+            }
+            applyCloudAnswers(data);
+            localStorage.setItem('sync_updated_at', data.updated_at);
+            setSyncStatus('☁️ 已拉取云端答案 (' + new Date(data.updated_at).toLocaleString() + ')');
+        } catch (e) {
+            setSyncStatus('❌ 拉取失败: ' + e.message + '（检查 Token 是否有效）');
+        }
+    }
+
+    async function pushToCloud() {
+        if (!getToken()) return;
+        setSyncStatus('☁️ 正在推送到云端...');
+        try {
+            const payload = { updated_at: new Date().toISOString(), answers: collectLocalAnswers() };
+            let sha = null;
+            const resp0 = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`, { headers: ghHeaders() });
+            if (resp0.ok) sha = (await resp0.json()).sha;
+            const body = {
+                message: 'sync: 更新练习题答案',
+                content: btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2)))),
+                sha: sha
+            };
+            const resp = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`, {
+                method: 'PUT',
+                headers: Object.assign(ghHeaders(), { 'Content-Type': 'application/json' }),
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            localStorage.setItem('sync_updated_at', payload.updated_at);
+            setSyncStatus('☁️ 已同步到云端 (' + new Date().toLocaleTimeString() + ')');
+        } catch (e) {
+            setSyncStatus('❌ 推送失败: ' + e.message + '（检查 Token 是否有 Contents 读写权限）');
+        }
+    }
 </script>
 </body>
 </html>

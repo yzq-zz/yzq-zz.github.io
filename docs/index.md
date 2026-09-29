@@ -8,10 +8,10 @@ hero:
   actions:
     - theme: brand
       text: 并发编程练习题
-      link: /并发编程练习题.html
+      link: /concurrency-exercises.html
 
 ---
 
 ## 笔记分类
 
-- [并发编程练习题](/并发编程练习题.html) — 基于《Java并发编程的艺术》《Java并发编程实战》的 badcase 练习
+- [并发编程练习题](/concurrency-exercises.html) — 基于《Java并发编程的艺术》《Java并发编程实战》的 badcase 练习

@@ -2,6 +2,8 @@
 
 保证一个类在整个 JVM 中只有一个实例，并提供一个全局访问点。
 
+> 每段代码都可以点「默写模式」自己默写一遍检验记忆：写一半忘了可以随时切回「查看答案」，草稿自动保留在浏览器本地。
+
 ## 前置：public/private 和 static 是两个独立维度
 
 | 修饰 | 管什么 | 含义 |
@@ -22,6 +24,8 @@
 
 ## 一、饿汉式
 
+<RecallCode name="singleton-hungry">
+
 ```java
 public class LazySingleton {
     // 饿汉式：类加载时直接 new，不懒
@@ -33,11 +37,15 @@ public class LazySingleton {
 }
 ```
 
+</RecallCode>
+
 - 类一加载就创建实例，天生线程安全（靠 JVM 类加载机制）
 - 缺点：不管用不用，加载类就创建，可能浪费资源
 - `final` 在声明处当场赋值，锁死"引用永远不变"
 
 ## 二、DCL 双重检查锁（懒汉式）
+
+<RecallCode name="singleton-dcl">
 
 ```java
 public class DCLSingleton {
@@ -57,6 +65,8 @@ public class DCLSingleton {
 }
 ```
 
+</RecallCode>
+
 **为什么要 volatile？** `new` 一个对象分三步：分配内存 → 初始化对象 → 引用指向内存。这三步可能发生指令重排序。没有 volatile 时，线程 A 执行到"引用已指向、对象还没初始化完"，线程 B 第一次检查发现不为 null，直接返回一个**半成品对象**。
 
 **为什么不能加 final？** final 字段必须在**声明的那一刻当场赋值**，不能先空着以后在方法里赋值。DCL 的本质就是"延迟到第一次调用才赋值"，没资格用 final。
@@ -66,6 +76,8 @@ public class DCLSingleton {
 :::
 
 ## 三、静态内部类 Holder（懒汉式，推荐）
+
+<RecallCode name="singleton-holder">
 
 ```java
 public class NeedSingleton {
@@ -79,6 +91,8 @@ public class NeedSingleton {
     }
 }
 ```
+
+</RecallCode>
 
 **懒加载原理**：不是"调用 getInstance 才 new"，而是**第一次用到 Hold 这个类时**，JVM 才加载它、才执行那行 new。getInstance 只是第一次引用 Hold 的地方。
 

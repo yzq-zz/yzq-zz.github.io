@@ -9,8 +9,6 @@ const props = defineProps({
 const storageKey = `recall-draft-${props.name}`
 const mode = ref('view') // view = 看答案, recall = 默写
 const draft = ref('')
-const result = ref(null)
-const answerEl = ref(null)
 
 onMounted(() => {
   draft.value = localStorage.getItem(storageKey) || ''
@@ -25,29 +23,10 @@ function toggle() {
   mode.value = mode.value === 'view' ? 'recall' : 'view'
 }
 
-function check() {
-  const pre = answerEl.value?.querySelector('pre')
-  const answer = (pre?.textContent || '').replace(/\r\n/g, '\n')
-  const expected = answer.split('\n').map(s => s.trim()).filter(Boolean)
-  const actual = draft.value.replace(/\r\n/g, '\n').split('\n').map(s => s.trim()).filter(Boolean)
-  const diffs = []
-  const len = Math.max(expected.length, actual.length)
-  for (let i = 0; i < len; i++) {
-    if (expected[i] !== actual[i]) {
-      diffs.push({
-        idx: i + 1,
-        expected: expected[i] || '（少了这一行）',
-        actual: actual[i] || '（多了这一行）'
-      })
-    }
-  }
-  result.value = { total: expected.length, ok: diffs.length === 0, diffs }
-}
-
+// 只清空当前这个默写框的草稿，不影响其他代码块
 function clearDraft() {
-  if (window.confirm('确定清空这篇代码的默写草稿吗？')) {
+  if (window.confirm('确定清空当前默写框的草稿吗？（只影响这一段代码）')) {
     draft.value = ''
-    result.value = null
     localStorage.removeItem(storageKey)
   }
 }
@@ -71,45 +50,26 @@ async function onKeydown(e) {
       <button class="recall-btn" @click="toggle">
         {{ mode === 'view' ? '默写模式' : '查看答案' }}
       </button>
-      <template v-if="mode === 'recall'">
-        <button class="recall-btn" @click="check">对答案</button>
-        <button class="recall-btn recall-danger" @click="clearDraft">清空</button>
-      </template>
+      <button v-if="mode === 'recall'" class="recall-btn recall-danger" @click="clearDraft">
+        清空
+      </button>
       <span class="recall-hint">
         {{ mode === 'view' ? '可写一半随时切回查看，草稿自动保留' : '草稿存在浏览器本地，刷新不丢' }}
       </span>
     </div>
 
-    <div v-show="mode === 'view'" ref="answerEl" class="recall-answer">
+    <div v-show="mode === 'view'" class="recall-answer">
       <slot />
     </div>
 
-    <div v-show="mode === 'recall'">
-      <textarea
-        v-model="draft"
-        class="recall-textarea"
-        spellcheck="false"
-        placeholder="在这里默写代码，Tab 可缩进…"
-        @keydown="onKeydown"
-      ></textarea>
-      <div v-if="result" class="recall-result">
-        <p v-if="result.ok" class="recall-ok">
-          共 {{ result.total }} 行，全部一致，记住了！
-        </p>
-        <template v-else>
-          <p class="recall-bad">
-            共 {{ result.total }} 行，有 {{ result.diffs.length }} 行不一致（按去掉空行、忽略首尾空格对比）：
-          </p>
-          <ol>
-            <li v-for="d in result.diffs" :key="d.idx">
-              <b>第 {{ d.idx }} 行</b>
-              <div class="recall-line recall-exp">答案：{{ d.expected }}</div>
-              <div class="recall-line recall-act">你的：{{ d.actual }}</div>
-            </li>
-          </ol>
-        </template>
-      </div>
-    </div>
+    <textarea
+      v-show="mode === 'recall'"
+      v-model="draft"
+      class="recall-textarea"
+      spellcheck="false"
+      placeholder="在这里默写代码，Tab 可缩进…"
+      @keydown="onKeydown"
+    ></textarea>
   </div>
 </template>
 
@@ -166,40 +126,5 @@ async function onKeydown(e) {
 }
 .recall-textarea:focus {
   border-color: var(--vp-c-brand-1);
-}
-.recall-result {
-  margin-top: 12px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--vp-c-bg-soft);
-  font-size: 13px;
-}
-.recall-ok {
-  color: var(--vp-c-brand-1);
-  font-weight: 600;
-}
-.recall-bad {
-  color: var(--vp-c-danger-1);
-  font-weight: 600;
-}
-.recall-result ol {
-  padding-left: 20px;
-  margin: 8px 0 0;
-}
-.recall-line {
-  font-family: var(--vp-font-family-mono);
-  white-space: pre-wrap;
-  word-break: break-all;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.recall-exp {
-  background: var(--vp-c-danger-soft);
-  color: var(--vp-c-danger-1);
-}
-.recall-act {
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-2);
-  margin-bottom: 6px;
 }
 </style>

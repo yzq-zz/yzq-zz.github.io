@@ -15,3 +15,4 @@ hero:
 ## 笔记分类
 
 - [并发编程练习题](/exercises/concurrency.html) — 基于《Java并发编程的艺术》《Java并发编程实战》的 badcase 练习
+- [单例模式](/java/singleton) — 饿汉式 / DCL / 静态内部类 Holder 三种写法与踩坑记录

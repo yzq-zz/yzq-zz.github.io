@@ -12,9 +12,10 @@ export default defineConfig({
     ],
     sidebar: [
       {
-        text: '练习题',
+        text: 'Java知识',
         items: [
-          { text: '并发编程练习题', link: '/exercises/concurrency.html' }
+          { text: '并发编程练习题', link: '/exercises/concurrency.html' },
+          { text: '单例模式', link: '/java/singleton' }
         ]
       }
       // 后续新增笔记分类，在这里加

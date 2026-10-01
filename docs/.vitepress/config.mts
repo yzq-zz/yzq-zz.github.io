@@ -13,13 +13,15 @@ export default defineConfig({
     sidebar: [
       {
         text: 'Java知识',
+        collapsed: false,
         items: [
           { text: '并发编程练习题', link: '/exercises/concurrency.html' },
           { text: '单例模式', link: '/java/singleton' }
         ]
       },
       {
-        text: 'Agent',
+        text: 'Agent知识',
+        collapsed: false,
         items: [
           { text: 'CLI 与 MCP 调用工具的区别', link: '/agent/cli-vs-mcp' }
         ]

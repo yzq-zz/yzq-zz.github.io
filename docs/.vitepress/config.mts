@@ -17,6 +17,12 @@ export default defineConfig({
           { text: '并发编程练习题', link: '/exercises/concurrency.html' },
           { text: '单例模式', link: '/java/singleton' }
         ]
+      },
+      {
+        text: 'Agent',
+        items: [
+          { text: 'CLI 与 MCP 调用工具的区别', link: '/agent/cli-vs-mcp' }
+        ]
       }
       // 后续新增笔记分类，在这里加
     ],

@@ -461,10 +461,20 @@ function newId() {
 }
 
 function deleteComment(id: string) {
-  if (!confirm('确定删除这条评论吗？')) return
-  comments = comments.filter((c) => c.id !== id)
+  // 收集要删的 id 集合：目标 + 它的所有后代回复
+  const toDelete = new Set<string>()
+  const queue = [id]
+  while (queue.length > 0) {
+    const cur = queue.shift()!
+    if (toDelete.has(cur)) continue
+    toDelete.add(cur)
+    for (const c of comments) if (c.parent_id === cur) queue.push(c.id)
+  }
+  const hasReply = toDelete.size > 1
+  if (!confirm(hasReply ? '确定删除这条评论及其 ' + (toDelete.size - 1) + ' 条回复吗？' : '确定删除这条评论吗？')) return
+  comments = comments.filter((c) => !toDelete.has(c.id))
   const deleted = getDeleted()
-  deleted.add(id)
+  for (const d of toDelete) deleted.add(d)
   saveDeleted(deleted)
   schedulePush()
   renderAll()
@@ -643,7 +653,8 @@ function renderSummary(box: HTMLElement, anchor: string) {
   const canWrite = !!getToken()
 
   box.innerHTML =
-    '<div class="ac-summary-head">' +
+    '<div class="ac-summary-head" role="button" tabindex="0">' +
+    '<span class="ac-summary-toggle">▸</span>' +
     '<span class="ac-summary-title">💬 本章评论</span>' +
     '<span class="ac-summary-count">' +
     (tops.length === 0
@@ -651,11 +662,13 @@ function renderSummary(box: HTMLElement, anchor: string) {
       : tops.length + ' 条' + (totalReplies > 0 ? ' · ' + totalReplies + ' 条回复' : '')) +
     '</span>' +
     '</div>' +
+    '<div class="ac-summary-list" hidden>' +
     (tops.length === 0
       ? '<div class="ac-empty">在下方说两句，或者选中正文任意段落划词评论</div>'
       : '<div class="ac-list">' +
         tops.map((c) => renderCommentItem(c)).join('') +
         '</div>') +
+    '</div>' +
     '<div class="ac-form">' +
     '<textarea class="ac-input" rows="2" placeholder="写下你的评论…（Enter 发送，Shift+Enter 换行）"></textarea>' +
     '<div class="ac-form-bar">' +
@@ -759,6 +772,24 @@ function renderSummary(box: HTMLElement, anchor: string) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
+    }
+  })
+
+  // 折叠/展开评论列表（输入框始终展开）
+  const head = box.querySelector<HTMLElement>('.ac-summary-head')!
+  const listBox = box.querySelector<HTMLElement>('.ac-summary-list')!
+  const toggle = box.querySelector<HTMLElement>('.ac-summary-toggle')!
+  const toggleExpand = () => {
+    const expanded = !listBox.hidden
+    listBox.hidden = expanded
+    toggle.textContent = expanded ? '▸' : '▾'
+    head.setAttribute('aria-expanded', String(!expanded))
+  }
+  head.addEventListener('click', toggleExpand)
+  head.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      toggleExpand()
     }
   })
 }
@@ -1296,9 +1327,31 @@ onBeforeUnmount(() => {
 }
 .vp-doc .ac-summary-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  margin: -4px 0 10px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+}
+.vp-doc .ac-summary-head:hover {
+  color: var(--vp-c-brand-1);
+}
+.vp-doc .ac-summary-head:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+.vp-doc .ac-summary-toggle {
+  font-size: 12px;
+  color: var(--vp-c-text-3);
+  transition: transform 0.15s;
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+}
+.vp-doc .ac-summary-list[hidden] {
+  display: none;
 }
 .vp-doc .ac-summary-title {
   font-size: 14px;

@@ -5,6 +5,7 @@ export default defineConfig({
   lang: 'zh-CN',
   title: '学习笔记',
   description: 'Java 后端秋招学习笔记',
+  head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
   themeConfig: {
     nav: [
       { text: '首页', link: '/' },

@@ -21,4 +21,4 @@ hero:
 
 ### Agent知识
 
-- [CLI 与 MCP 调用工具的区别](/agent/cli-vs-mcp) — 面试题：接口契约、状态生命周期、可发现性与生态复用三个维度对比
+- [CLI / MCP 的区别与 Bash 基础](/agent/cli-vs-mcp) — 面试题：两种工具调用形态、Token 经济学、能力边界，以及 Bash 解释器原理

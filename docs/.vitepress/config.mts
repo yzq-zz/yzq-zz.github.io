@@ -24,7 +24,7 @@ export default defineConfig({
         text: 'Agent知识',
         collapsed: false,
         items: [
-          { text: 'CLI 与 MCP 调用工具的区别', link: '/agent/cli-vs-mcp' }
+          { text: 'CLI / MCP 的区别与 Bash 基础', link: '/agent/cli-vs-mcp' }
         ]
       }
       // 后续新增笔记分类，在这里加

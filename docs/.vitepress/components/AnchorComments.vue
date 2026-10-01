@@ -14,6 +14,7 @@ interface Comment {
   author: string
   created_at: string
   quote?: string // 划词评论时选中的原文
+  parent_id?: string // 被回复的评论 id；空表示顶层评论
 }
 
 const GH_OWNER = 'yzq-zz'
@@ -41,7 +42,7 @@ const selPop = ref({ visible: false, x: 0, y: 0, quote: '', anchor: '' })
 
 // 选区不允许出现在这些元素内（编辑器、评论面板自身、浮条等）
 const SEL_BLOCKED =
-  '.cm-editor, .cm-content, textarea, input, .ac-panel, .ac-toggle, .ac-selpop, .ac-dock, .ac-config'
+  '.cm-editor, .cm-content, textarea, input, .ac-panel, .ac-toggle, .ac-selpop, .ac-dock, .ac-config, .ac-summary'
 
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || ''
@@ -441,17 +442,22 @@ function renderPanel(panel: HTMLElement, anchor: string) {
   input.focus()
 }
 
-function addComment(anchor: string, text: string, quote?: string) {
+function addComment(anchor: string, text: string, quote?: string, parent_id?: string) {
   comments.push({
     id: (crypto.randomUUID?.() || String(Date.now()) + Math.random()),
     anchor,
     text,
     author: login.value || '我',
     created_at: new Date().toISOString(),
-    quote
+    quote,
+    parent_id
   })
   schedulePush()
   renderAll()
+}
+
+function newId() {
+  return crypto.randomUUID?.() || String(Date.now()) + Math.random()
 }
 
 function deleteComment(id: string) {
@@ -467,6 +473,7 @@ function deleteComment(id: string) {
 function renderAll() {
   refreshBadges()
   applyHighlights()
+  renderSummaries()
   const panel = document.querySelector<HTMLElement>('.ac-panel')
   if (panel) renderPanel(panel, panel.dataset.anchor!)
 }
@@ -546,6 +553,225 @@ function applyHighlights() {
       }
     }
   }
+}
+
+// ---------- 章节末尾评论汇总 ----------
+function clearSummaries() {
+  document.querySelectorAll<HTMLElement>('.ac-summary').forEach((el) => el.remove())
+}
+
+function buildSummaryEl(h: HTMLElement) {
+  const box = document.createElement('div')
+  box.className = 'ac-summary'
+  box.dataset.anchor = h.id
+  renderSummary(box, h.id)
+  return box
+}
+
+function placeSummary(h: HTMLElement) {
+  // 找到该章节最后一个段落/兄弟，作为锚点
+  let last: Element = h
+  let sib: Element | null = h.nextElementSibling
+  while (sib && sib.tagName !== 'H2' && sib.tagName !== 'H3') {
+    last = sib
+    sib = sib.nextElementSibling
+  }
+  last.after(buildSummaryEl(h))
+}
+
+function timeText(iso: string) {
+  return new Date(iso).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+// 渲染单条评论的 HTML 片段（含回复列表 + 回复输入框）
+function renderCommentItem(c: Comment, isReply = false): string {
+  const mine = c.author === login.value
+  const color = avatarColor(c.author)
+  const time = timeText(c.created_at)
+  return (
+    '<div class="ac-item' + (isReply ? ' ac-reply' : '') + '" data-id="' + c.id + '">' +
+    '<div class="ac-avatar" style="background:' + color + '">' +
+    c.author.slice(0, 1).toUpperCase() +
+    '</div>' +
+    '<div class="ac-body">' +
+    '<div class="ac-meta">' +
+    '<span class="ac-author"></span>' +
+    (mine ? '<span class="ac-badge-me">我</span>' : '') +
+    '<span class="ac-time">' + time + '</span>' +
+    (isReply ? '' : '<button type="button" class="ac-reply-btn" title="回复">回复</button>') +
+    (canDelete(c) ? '<button type="button" class="ac-del" title="删除评论">删除</button>' : '') +
+    '</div>' +
+    (c.quote ? '<div class="ac-quote" title="点击定位原文"></div>' : '') +
+    '<div class="ac-text"></div>' +
+    '<div class="ac-reply-list"></div>' +
+    '<div class="ac-reply-form" hidden>' +
+    '<textarea class="ac-input ac-input-mini" rows="1" placeholder="回复 ' + escapeHtml(c.author) + '…（Enter 发送，Esc 取消）"></textarea>' +
+    '<div class="ac-reply-form-bar">' +
+    '<button type="button" class="ac-reply-cancel">取消</button>' +
+    '<button type="button" class="ac-reply-send"' + (getToken() ? '' : ' disabled') + '>发送</button>' +
+    '</div></div>' +
+    '</div></div>'
+  )
+}
+
+function escapeHtml(s: string) {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }
+  return s.replace(/[&<>"']/g, (ch) => map[ch])
+}
+
+function canDelete(c: Comment) {
+  return c.author === login.value && !!getToken()
+}
+
+function renderSummary(box: HTMLElement, anchor: string) {
+  const list = commentsOf(anchor)
+  const tops = list.filter((c) => !c.parent_id)
+  const repliesOf = (pid: string) => list.filter((c) => c.parent_id === pid)
+  const totalReplies = list.length - tops.length
+  const me = login.value
+  const canWrite = !!getToken()
+
+  box.innerHTML =
+    '<div class="ac-summary-head">' +
+    '<span class="ac-summary-title">💬 本章评论</span>' +
+    '<span class="ac-summary-count">' +
+    (tops.length === 0
+      ? '还没有评论'
+      : tops.length + ' 条' + (totalReplies > 0 ? ' · ' + totalReplies + ' 条回复' : '')) +
+    '</span>' +
+    '</div>' +
+    (tops.length === 0
+      ? '<div class="ac-empty">在下方说两句，或者选中正文任意段落划词评论</div>'
+      : '<div class="ac-list">' +
+        tops.map((c) => renderCommentItem(c)).join('') +
+        '</div>') +
+    '<div class="ac-form">' +
+    '<textarea class="ac-input" rows="2" placeholder="写下你的评论…（Enter 发送，Shift+Enter 换行）"></textarea>' +
+    '<div class="ac-form-bar">' +
+    (canWrite
+      ? '<span class="ac-hint">以 <b>' + me + '</b> 身份评论</span>'
+      : '<span class="ac-hint ac-warn">配置 GitHub Token 后才能发表评论</span>') +
+    '<button type="button" class="ac-send"' +
+    (canWrite ? '' : ' disabled') +
+    '>发送</button>' +
+    '</div></div>'
+
+  // 安全填字段
+  box.querySelectorAll<HTMLElement>('.ac-item').forEach((el) => {
+    const id = el.dataset.id!
+    const c = list.find((x) => x.id === id)
+    if (!c) return
+    el.querySelector('.ac-author')!.textContent = c.author
+    el.querySelector('.ac-text')!.textContent = c.text
+    if (c.quote) {
+      const q = el.querySelector<HTMLElement>('.ac-quote')!
+      q.textContent = '「' + c.quote + '」'
+      q.addEventListener('click', () => {
+        const mark = document.querySelector<HTMLElement>('mark.ac-quote-mark[data-cid="' + c.id + '"]')
+        if (mark) {
+          mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          mark.classList.add('ac-flash')
+          setTimeout(() => mark.classList.remove('ac-flash'), 1600)
+        }
+      })
+    }
+    // 回复列表
+    const repList = el.querySelector<HTMLElement>('.ac-reply-list')!
+    const reps = repliesOf(id)
+    if (reps.length > 0) {
+      repList.innerHTML = reps.map((r) => renderCommentItem(r, true)).join('')
+      repList.querySelectorAll<HTMLElement>('.ac-reply').forEach((repEl) => {
+        const rid = repEl.dataset.id!
+        const rc = reps.find((x) => x.id === rid)!
+        repEl.querySelector('.ac-author')!.textContent = rc.author
+        repEl.querySelector('.ac-text')!.textContent = rc.text
+      })
+    }
+    // 删除按钮
+    const delBtn = el.querySelector<HTMLButtonElement>('.ac-del')
+    if (delBtn) delBtn.addEventListener('click', () => deleteComment(c.id))
+    // 回复按钮
+    const replyBtn = el.querySelector<HTMLButtonElement>('.ac-reply-btn')
+    const replyForm = el.querySelector<HTMLElement>('.ac-reply-form')
+    if (replyBtn && replyForm) {
+      replyBtn.addEventListener('click', () => {
+        replyForm.hidden = false
+        const ta = replyForm.querySelector<HTMLTextAreaElement>('.ac-input-mini')!
+        ta.focus()
+      })
+      const cancel = replyForm.querySelector<HTMLButtonElement>('.ac-reply-cancel')!
+      const sendR = replyForm.querySelector<HTMLButtonElement>('.ac-reply-send')!
+      const ta = replyForm.querySelector<HTMLTextAreaElement>('.ac-input-mini')!
+      cancel.addEventListener('click', () => {
+        replyForm.hidden = true
+        ta.value = ''
+      })
+      ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          cancel.click()
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          sendR.click()
+        }
+      })
+      sendR.addEventListener('click', () => {
+        const t = ta.value.trim()
+        if (!t) return
+        if (!getToken()) {
+          showConfig.value = true
+          return
+        }
+        addComment(anchor, t, undefined, c.id)
+        ta.value = ''
+        replyForm.hidden = true
+      })
+    }
+  })
+
+  // 顶部发评论输入框
+  const input = box.querySelector<HTMLTextAreaElement>('.ac-input:not(.ac-input-mini)')!
+  const send = box.querySelector<HTMLButtonElement>('.ac-send')!
+  const submit = () => {
+    const text = input.value.trim()
+    if (!text) return
+    if (!getToken()) {
+      showConfig.value = true
+      return
+    }
+    addComment(anchor, text)
+    input.value = ''
+    input.focus()
+  }
+  send.addEventListener('click', submit)
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submit()
+    }
+  })
+}
+
+function renderSummaries() {
+  clearSummaries()
+  document
+    .querySelectorAll<HTMLElement>('.vp-doc h2[id], .vp-doc h3[id]')
+    .forEach((h) => {
+      const list = commentsOf(h.id)
+      if (list.length === 0) return // 没评论就不渲染，避免无谓占位
+      placeSummary(h)
+    })
 }
 
 // ---------- Token 浮条 ----------
@@ -1058,6 +1284,117 @@ onBeforeUnmount(() => {
 }
 .ac-pending-x:hover {
   color: var(--vp-c-text-1);
+}
+
+/* ===== 章节末尾评论汇总 ===== */
+.vp-doc .ac-summary {
+  margin: 20px 0 28px;
+  padding: 14px 16px 12px;
+  background: var(--vp-c-bg-soft);
+  border: 1px dashed var(--vp-c-divider);
+  border-radius: 10px;
+}
+.vp-doc .ac-summary-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.vp-doc .ac-summary-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+.vp-doc .ac-summary-count {
+  font-size: 12px;
+  color: var(--vp-c-text-3);
+}
+.vp-doc .ac-summary .ac-list {
+  margin-bottom: 10px;
+}
+.vp-doc .ac-summary .ac-item {
+  padding: 6px 0;
+}
+.vp-doc .ac-summary .ac-reply {
+  margin-top: 6px;
+  margin-left: 38px;
+  padding-left: 10px;
+  border-left: 2px solid var(--vp-c-divider);
+}
+.vp-doc .ac-summary .ac-reply .ac-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+.vp-doc .ac-summary .ac-reply .ac-text {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.vp-doc .ac-summary .ac-reply .ac-meta {
+  font-size: 12px;
+}
+.vp-doc .ac-reply-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--vp-c-text-3);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.vp-doc .ac-reply-btn:hover {
+  color: var(--vp-c-brand-1);
+}
+.vp-doc .ac-reply-form {
+  margin-top: 6px;
+  margin-left: 38px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vp-doc .ac-reply-form[hidden] {
+  display: none;
+}
+.vp-doc .ac-input-mini {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 6px 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 7px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  outline: none;
+  font-family: inherit;
+}
+.vp-doc .ac-input-mini:focus {
+  border-color: var(--vp-c-brand-1);
+}
+.vp-doc .ac-reply-form-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.vp-doc .ac-reply-cancel,
+.vp-doc .ac-reply-send {
+  padding: 3px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--vp-c-divider);
+  background: transparent;
+  color: var(--vp-c-text-2);
+}
+.vp-doc .ac-reply-send {
+  border: none;
+  background: var(--vp-c-brand-1);
+  color: #fff;
+}
+.vp-doc .ac-reply-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ===== 正文里被评论文字的高亮 ===== */

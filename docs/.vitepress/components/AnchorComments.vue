@@ -26,7 +26,6 @@ const route = useRoute()
 
 let comments: Comment[] = []
 let knownSha: string | null = null
-let observer: MutationObserver | null = null
 let pushTimer: ReturnType<typeof setTimeout> | null = null
 let pullSeq = 0
 
@@ -626,9 +625,6 @@ onMounted(() => {
   if (t && !login.value) fetchLogin(t)
   initPage()
 
-  observer = new MutationObserver(() => enhanceHeadings())
-  observer.observe(document.body, { childList: true, subtree: true })
-
   document.addEventListener('mouseup', onSelectionEnd)
   document.addEventListener('touchend', onSelectionEnd)
   document.addEventListener('selectionchange', scheduleSelCheck)
@@ -643,7 +639,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  observer?.disconnect()
   if (pushTimer) clearTimeout(pushTimer)
   if (selCheckTimer) clearTimeout(selCheckTimer)
   document.removeEventListener('mouseup', onSelectionEnd)

@@ -13,6 +13,7 @@ interface Comment {
   text: string
   author: string
   created_at: string
+  quote?: string // 划词评论时选中的原文
 }
 
 const GH_OWNER = 'yzq-zz'
@@ -35,6 +36,13 @@ const login = ref('')
 const syncMsg = ref('')
 const showConfig = ref(false)
 const tokenInput = ref('')
+
+// ---------- 划词后浮出的「评论」小按钮 ----------
+const selPop = ref({ visible: false, x: 0, y: 0, quote: '', anchor: '' })
+
+// 选区不允许出现在这些元素内（编辑器、评论面板自身、浮条等）
+const SEL_BLOCKED =
+  '.cm-editor, .cm-content, textarea, input, .ac-panel, .ac-toggle, .ac-selpop, .ac-dock, .ac-config'
 
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || ''
@@ -197,25 +205,135 @@ function refreshBadges() {
     })
 }
 
+function closePanel() {
+  document.querySelectorAll('.ac-panel').forEach((p) => p.remove())
+}
+
+function openPanel(anchor: string, quote?: string) {
+  const h = document.getElementById(anchor)
+  if (!h) return
+  closePanel()
+  const panel = document.createElement('div')
+  panel.className = 'ac-panel'
+  panel.dataset.anchor = anchor
+  if (quote) panel.dataset.pendingQuote = quote
+  h.after(panel)
+  renderPanel(panel, anchor)
+  if (quote) h.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+}
+
 function togglePanel(h: HTMLElement) {
   const existing = h.nextElementSibling as HTMLElement | null
   if (existing && existing.classList.contains('ac-panel')) {
     existing.remove()
     return
   }
-  // 关闭其他面板
-  document.querySelectorAll('.ac-panel').forEach((p) => p.remove())
-  const panel = document.createElement('div')
-  panel.className = 'ac-panel'
-  panel.dataset.anchor = h.id
-  h.after(panel)
-  renderPanel(panel, h.id)
+  openPanel(h.id)
+}
+
+// 找一个 DOM 节点归属的最近标题锚点（选区落在哪个章节）
+function anchorOfNode(node: Node | null): string | null {
+  if (!node) return null
+  const headings = [...document.querySelectorAll<HTMLElement>('.vp-doc h2[id], .vp-doc h3[id]')]
+  let found: string | null = null
+  for (const h of headings) {
+    if (h === node || h.contains(node)) return h.id
+    if (h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) found = h.id
+  }
+  return found
+}
+
+// ---------- 划词评论 ----------
+let selCheckTimer: ReturnType<typeof setTimeout> | null = null
+
+function hideSelPop() {
+  selPop.value.visible = false
+}
+
+// 核心检测：读当前选区，决定是否显示浮动按钮
+function checkSelection() {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+    hideSelPop()
+    return
+  }
+  const text = sel.toString().trim()
+  if (text.length < 2) {
+    hideSelPop()
+    return
+  }
+  const node = sel.anchorNode
+  const el = node instanceof Element ? node : node?.parentElement
+  if (!el || !el.closest('.vp-doc') || el.closest(SEL_BLOCKED)) {
+    hideSelPop()
+    return
+  }
+  const anchor = anchorOfNode(sel.getRangeAt(0).startContainer)
+  if (!anchor) {
+    hideSelPop()
+    return
+  }
+  const rect = sel.getRangeAt(0).getBoundingClientRect()
+  if (!rect || (rect.width === 0 && rect.height === 0)) {
+    hideSelPop()
+    return
+  }
+  const x = Math.min(Math.max(rect.left + rect.width / 2 - 44, 8), window.innerWidth - 100)
+  const y = rect.top < 52 ? rect.bottom + 8 : rect.top - 38
+  selPop.value = { visible: true, x, y, quote: text, anchor }
+}
+
+// selectionchange 在拖选/键盘选词时高频触发，防抖到选择停顿后再弹
+function scheduleSelCheck() {
+  if (selCheckTimer) clearTimeout(selCheckTimer)
+  selCheckTimer = setTimeout(checkSelection, 80)
+}
+
+function onSelectionEnd() {
+  // 鼠标/触摸松手：立即检测一次（不等防抖）
+  if (selCheckTimer) clearTimeout(selCheckTimer)
+  selCheckTimer = setTimeout(checkSelection, 10)
+}
+
+function onSelPopClick() {
+  const { quote, anchor } = selPop.value
+  hideSelPop()
+  window.getSelection()?.removeAllRanges()
+  if (!quote || !anchor) return
+  openPanel(anchor, quote)
+}
+
+// 点击面板外部 / Esc → 关闭面板与划词按钮
+function onDocPointerDown(e: PointerEvent) {
+  const t = e.target as HTMLElement | null
+  if (
+    t &&
+    (t.closest('.ac-panel') ||
+      t.closest('.ac-toggle') ||
+      t.closest('.ac-selpop') ||
+      t.closest('.ac-dock'))
+  ) {
+    return
+  }
+  closePanel()
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  const t = e.target as HTMLElement | null
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) {
+    t.blur()
+    return
+  }
+  hideSelPop()
+  closePanel()
 }
 
 function renderPanel(panel: HTMLElement, anchor: string) {
   const list = commentsOf(anchor)
   const canWrite = !!getToken()
   const me = login.value
+  const pendingQuote = panel.dataset.pendingQuote || ''
   panel.innerHTML =
     '<div class="ac-list">' +
     list
@@ -239,6 +357,7 @@ function renderPanel(panel: HTMLElement, anchor: string) {
           '<span class="ac-time">' + time + '</span>' +
           '<button type="button" class="ac-del" title="删除评论">删除</button>' +
           '</div>' +
+          (c.quote ? '<div class="ac-quote" title="点击定位原文"></div>' : '') +
           '<div class="ac-text"></div>' +
           '</div></div>'
         )
@@ -247,7 +366,15 @@ function renderPanel(panel: HTMLElement, anchor: string) {
     (list.length === 0 ? '<div class="ac-empty">还没有评论，来说两句吧</div>' : '') +
     '</div>' +
     '<div class="ac-form">' +
-    '<textarea class="ac-input" rows="2" placeholder="写下你的评论…（Enter 发送，Shift+Enter 换行）"></textarea>' +
+    (pendingQuote
+      ? '<div class="ac-pending"><span class="ac-pending-text"></span>' +
+        '<button type="button" class="ac-pending-x" title="取消引用原文">×</button></div>'
+      : '') +
+    '<textarea class="ac-input" rows="2" placeholder="' +
+    (pendingQuote
+      ? '针对选中的原文写评论…（Enter 发送，Shift+Enter 换行）'
+      : '写下你的评论…（Enter 发送，Shift+Enter 换行）') +
+    '"></textarea>' +
     '<div class="ac-form-bar">' +
     (canWrite
       ? '<span class="ac-hint">以 <b>' + me + '</b> 身份评论</span>'
@@ -257,18 +384,39 @@ function renderPanel(panel: HTMLElement, anchor: string) {
     '>发送</button>' +
     '</div></div>'
 
-  // 安全写入用户名和正文（防 XSS）
+  // 安全写入用户名、正文、引用（防 XSS）
   panel.querySelectorAll<HTMLElement>('.ac-item').forEach((el, i) => {
     const c = list[i]
     el.querySelector('.ac-author')!.textContent = c.author
     el.querySelector('.ac-text')!.textContent = c.text
+    if (c.quote) {
+      const q = el.querySelector<HTMLElement>('.ac-quote')!
+      q.textContent = '「' + c.quote + '」'
+      q.addEventListener('click', () => {
+        const mark = document.querySelector<HTMLElement>('mark.ac-quote-mark[data-cid="' + c.id + '"]')
+        if (mark) {
+          closePanel()
+          mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          mark.classList.add('ac-flash')
+          setTimeout(() => mark.classList.remove('ac-flash'), 1600)
+        }
+      })
+    }
     const delBtn = el.querySelector<HTMLButtonElement>('.ac-del')!
     if (c.author === me && canWrite) {
-      delBtn.addEventListener('click', () => deleteComment(c.id, anchor))
+      delBtn.addEventListener('click', () => deleteComment(c.id))
     } else {
       delBtn.remove()
     }
   })
+
+  if (pendingQuote) {
+    panel.querySelector<HTMLElement>('.ac-pending-text')!.textContent = '「' + pendingQuote + '」'
+    panel.querySelector<HTMLButtonElement>('.ac-pending-x')!.addEventListener('click', () => {
+      delete panel.dataset.pendingQuote
+      renderPanel(panel, anchor)
+    })
+  }
 
   const input = panel.querySelector<HTMLTextAreaElement>('.ac-input')!
   const send = panel.querySelector<HTMLButtonElement>('.ac-send')!
@@ -278,10 +426,11 @@ function renderPanel(panel: HTMLElement, anchor: string) {
       if (!getToken()) showConfig.value = true
       return
     }
-    addComment(anchor, text)
-    renderPanel(panel, anchor)
-    const ni = panel.querySelector<HTMLTextAreaElement>('.ac-input')
-    ni?.focus()
+    const quote = panel.dataset.pendingQuote || undefined
+    delete panel.dataset.pendingQuote
+    addComment(anchor, text, quote)
+    const np = document.querySelector<HTMLElement>('.ac-panel[data-anchor="' + anchor + '"]')
+    np?.querySelector<HTMLTextAreaElement>('.ac-input')?.focus()
   }
   send.addEventListener('click', submit)
   input.addEventListener('keydown', (e) => {
@@ -293,34 +442,111 @@ function renderPanel(panel: HTMLElement, anchor: string) {
   input.focus()
 }
 
-function addComment(anchor: string, text: string) {
+function addComment(anchor: string, text: string, quote?: string) {
   comments.push({
     id: (crypto.randomUUID?.() || String(Date.now()) + Math.random()),
     anchor,
     text,
     author: login.value || '我',
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    quote
   })
-  refreshBadges()
   schedulePush()
+  renderAll()
 }
 
-function deleteComment(id: string, anchor: string) {
+function deleteComment(id: string) {
   if (!confirm('确定删除这条评论吗？')) return
   comments = comments.filter((c) => c.id !== id)
   const deleted = getDeleted()
   deleted.add(id)
   saveDeleted(deleted)
-  refreshBadges()
-  const panel = document.querySelector<HTMLElement>('.ac-panel[data-anchor="' + anchor + '"]')
-  if (panel) renderPanel(panel, anchor)
   schedulePush()
+  renderAll()
 }
 
 function renderAll() {
   refreshBadges()
+  applyHighlights()
   const panel = document.querySelector<HTMLElement>('.ac-panel')
   if (panel) renderPanel(panel, panel.dataset.anchor!)
+}
+
+// ---------- 划词评论的原文高亮（尽力而为，找不到就降级为只在面板显示引用） ----------
+function clearHighlights() {
+  document.querySelectorAll<HTMLElement>('mark.ac-quote-mark').forEach((m) => {
+    const parent = m.parentNode
+    if (parent) {
+      parent.replaceChild(document.createTextNode(m.textContent || ''), m)
+      parent.normalize()
+    }
+  })
+}
+
+function wrapQuoteInNode(node: Text, quote: string, c: Comment): boolean {
+  const idx = node.data.indexOf(quote)
+  if (idx < 0) return false
+  try {
+    const range = document.createRange()
+    range.setStart(node, idx)
+    range.setEnd(node, idx + quote.length)
+    const mark = document.createElement('mark')
+    mark.className = 'ac-quote-mark'
+    mark.dataset.cid = c.id
+    mark.title = '点击查看评论'
+    range.surroundContents(mark)
+    mark.addEventListener('click', (e) => {
+      e.stopPropagation()
+      openPanel(c.anchor)
+      mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    return true
+  } catch {
+    return false // 选区跨越了标签边界，第一版不处理
+  }
+}
+
+function applyHighlights() {
+  clearHighlights()
+  const quoted = comments.filter((c) => c.quote && c.quote.length >= 2)
+  if (quoted.length === 0) return
+  for (const c of quoted) {
+    const h = document.getElementById(c.anchor)
+    if (!h) continue
+    // 作用域：标题之后，到下一个 h2/h3 之前
+    const scopeEls: Element[] = []
+    let sib: Element | null = h.nextElementSibling
+    while (sib && !(sib.tagName === 'H2' || sib.tagName === 'H3')) {
+      scopeEls.push(sib)
+      sib = sib.nextElementSibling
+    }
+    outer: for (const scope of scopeEls) {
+      if (scope.closest(SEL_BLOCKED)) continue
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+        acceptNode(n) {
+          const p = n.parentElement
+          if (!p) return NodeFilter.FILTER_REJECT
+          const tag = p.tagName
+          if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA') {
+            return NodeFilter.FILTER_REJECT
+          }
+          if (p.closest('.ac-panel, .ac-toggle, .ac-selpop, .cm-editor, mark.ac-quote-mark')) {
+            return NodeFilter.FILTER_REJECT
+          }
+          return NodeFilter.FILTER_ACCEPT
+        }
+      })
+      const targets: Text[] = []
+      let cur = walker.nextNode()
+      while (cur) {
+        targets.push(cur as Text)
+        cur = walker.nextNode()
+      }
+      for (const t of targets) {
+        if (wrapQuoteInNode(t, c.quote!, c)) break outer
+      }
+    }
+  }
 }
 
 // ---------- Token 浮条 ----------
@@ -369,7 +595,8 @@ function resetToken() {
 
 // ---------- 生命周期 ----------
 function initPage() {
-  document.querySelectorAll('.ac-panel').forEach((p) => p.remove())
+  hideSelPop()
+  closePanel()
   comments = []
   knownSha = null
   enhanceHeadings()
@@ -401,6 +628,13 @@ onMounted(() => {
 
   observer = new MutationObserver(() => enhanceHeadings())
   observer.observe(document.body, { childList: true, subtree: true })
+
+  document.addEventListener('mouseup', onSelectionEnd)
+  document.addEventListener('touchend', onSelectionEnd)
+  document.addEventListener('selectionchange', scheduleSelCheck)
+  window.addEventListener('scroll', hideSelPop, { passive: true, capture: true })
+  document.addEventListener('pointerdown', onDocPointerDown, true)
+  document.addEventListener('keydown', onKeyDown)
 })
 
 watch(
@@ -411,10 +645,27 @@ watch(
 onBeforeUnmount(() => {
   observer?.disconnect()
   if (pushTimer) clearTimeout(pushTimer)
+  if (selCheckTimer) clearTimeout(selCheckTimer)
+  document.removeEventListener('mouseup', onSelectionEnd)
+  document.removeEventListener('touchend', onSelectionEnd)
+  document.removeEventListener('selectionchange', scheduleSelCheck)
+  window.removeEventListener('scroll', hideSelPop, { capture: true } as EventListenerOptions)
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+  document.removeEventListener('keydown', onKeyDown)
 })
 </script>
 
 <template>
+  <button
+    v-show="selPop.visible"
+    type="button"
+    class="ac-selpop"
+    :style="{ top: selPop.y + 'px', left: selPop.x + 'px' }"
+    @mousedown.prevent
+    @click="onSelPopClick"
+  >
+    💬 评论
+  </button>
   <div class="ac-dock">
     <div v-if="syncMsg" class="ac-toast">{{ syncMsg }}</div>
     <div v-if="showConfig" class="ac-config">
@@ -728,5 +979,105 @@ onBeforeUnmount(() => {
     font-size: 12px;
     padding: 7px 12px;
   }
+}
+
+/* ===== 划词后浮出的评论按钮 ===== */
+.ac-selpop {
+  position: fixed;
+  z-index: 200;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 1;
+  color: #fff;
+  background: #1f2329;
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  animation: ac-pop-in 0.12s ease-out;
+}
+.ac-selpop:hover {
+  background: var(--vp-c-brand-1);
+}
+@keyframes ac-pop-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* ===== 评论里的原文引用条 ===== */
+.ac-quote {
+  margin-top: 5px;
+  padding: 3px 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+  background: var(--vp-c-bg-soft-down, rgba(128, 128, 128, 0.1));
+  border-left: 3px solid var(--vp-c-divider);
+  border-radius: 0 5px 5px 0;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ac-quote:hover {
+  color: var(--vp-c-brand-1);
+  border-left-color: var(--vp-c-brand-1);
+}
+
+/* ===== 待发表的引用条 ===== */
+.ac-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+  border-radius: 7px;
+}
+.ac-pending-text {
+  flex: 1;
+  word-break: break-word;
+}
+.ac-pending-x {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--vp-c-text-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ac-pending-x:hover {
+  color: var(--vp-c-text-1);
+}
+
+/* ===== 正文里被评论文字的高亮 ===== */
+.vp-doc mark.ac-quote-mark {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 22%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.vp-doc mark.ac-quote-mark:hover {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 38%, transparent);
+}
+.vp-doc mark.ac-quote-mark.ac-flash {
+  background: color-mix(in srgb, var(--vp-c-warning-1, #d98a04) 45%, transparent);
 }
 </style>

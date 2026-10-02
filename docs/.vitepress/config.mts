@@ -24,8 +24,14 @@ export default defineConfig({
         text: 'Agent知识',
         collapsed: false,
         items: [
-          { text: 'CLI / MCP 的区别与 Bash 基础', link: '/agent/cli-vs-mcp' },
-          { text: '11. 商品搜索工具：从 Demo 到生产', link: '/agent/product-search' }
+          { text: 'CLI / MCP 的区别与 Bash 基础', link: '/agent/cli-vs-mcp' }
+        ]
+      },
+      {
+        text: 'Agent项目',
+        collapsed: false,
+        items: [
+          { text: '11. 商品搜索工具：生产级检索链路', link: '/agent-project/product-search' }
         ]
       }
       // 后续新增笔记分类，在这里加

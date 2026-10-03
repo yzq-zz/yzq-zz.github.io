@@ -31,7 +31,8 @@ export default defineConfig({
         text: 'Agent项目',
         collapsed: false,
         items: [
-          { text: '11. 商品搜索工具：生产级检索链路', link: '/agent-project/product-search' }
+          { text: '11. 商品搜索工具：生产级检索链路', link: '/agent-project/product-search' },
+          { text: '13. CategoryInsight工具：品类知识RAG', link: '/agent-project/category-insight' }
         ]
       }
       // 后续新增笔记分类，在这里加

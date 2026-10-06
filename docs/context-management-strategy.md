@@ -6,7 +6,7 @@ outline: false
 
 <div class="exercise-frame">
   <iframe
-    src="/context-management-strategy.html"
+    src="/context-management-view.html"
     style="width: 100%; height: 100%; border: none;"
     title="上下文管理策略"
   ></iframe>

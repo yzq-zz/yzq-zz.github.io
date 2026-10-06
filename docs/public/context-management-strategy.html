@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>上下文管理：按 Token 切的坏处 vs 我们项目的做法</title>
+<style>
+  :root {
+    --bg: #f7f7fb;
+    --card: #ffffff;
+    --ink: #1f2330;
+    --muted: #5b6273;
+    --line: #e3e6ee;
+    --accent: #2d6cdf;
+    --bad: #d64545;
+    --good: #1f9d6b;
+    --warn: #c98a2b;
+    --purple: #6f4cd1;
+    --user: #2d6cdf;
+    --assistant: #1f9d6b;
+    --tool: #6f4cd1;
+    --archive: #c98a2b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  header { padding: 28px 36px 8px; }
+  header h1 { margin: 0 0 6px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 28px 60px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px 26px 26px;
+    margin-bottom: 22px;
+  }
+  section h2 { margin: 0 0 4px; font-size: 18px; }
+  section .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .dot.user { background: var(--user); }
+  .dot.assistant { background: var(--assistant); }
+  .dot.tool { background: var(--tool); }
+  .dot.archive { background: var(--archive); }
+  .dot.bad { background: var(--bad); }
+  .dot.good { background: var(--good); }
+
+  /* timeline */
+  .timeline { position: relative; padding-left: 130px; margin: 10px 0 4px; }
+  .row { position: relative; min-height: 36px; padding: 6px 0; }
+  .row .who {
+    position: absolute; left: -130px; top: 6px; width: 116px; text-align: right; font-size: 12px; color: var(--muted);
+  }
+  .row .who span {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    background: #eef0f6; color: var(--ink);
+  }
+  .row.user .who span { background: #e3edff; color: var(--user); }
+  .row.assistant .who span { background: #def5ea; color: var(--assistant); }
+  .row.tool .who span { background: #ece5ff; color: var(--purple); }
+
+  .bubble {
+    display: inline-block; padding: 7px 12px; border-radius: 8px; font-size: 13px;
+    max-width: 92%; border: 1px solid transparent;
+  }
+  .row.user .bubble { background: #f3f7ff; border-color: #d6e3ff; color: #0e3a8c; }
+  .row.assistant .bubble { background: #f0faf5; border-color: #cfe7d9; color: #0f5a3a; }
+  .row.tool .bubble { background: #f6f3ff; border-color: #ddd1ff; color: #4527a0; }
+
+  /* 结局颜色（左侧细条） */
+  .row .bubble { position: relative; }
+  .row.kept .bubble::before,
+  .row.cut .bubble::before,
+  .row.compressed .bubble::before,
+  .row.archived .bubble::before {
+    content: ""; position: absolute; left: -8px; top: 6px; bottom: 6px; width: 3px; border-radius: 2px;
+  }
+  .row.kept .bubble::before { background: var(--good); }
+  .row.cut .bubble::before { background: var(--bad); }
+  .row.compressed .bubble::before { background: var(--warn); }
+  .row.archived .bubble::before { background: var(--archive); }
+
+  /* 切断线 */
+  .cut {
+    position: relative; margin: 10px 0; height: 26px;
+  }
+  .cut::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 12px;
+    border-top: 2px dashed var(--bad);
+  }
+  .cut::after {
+    content: attr(data-label);
+    position: absolute; right: 0; top: -2px;
+    background: var(--bad); color: #fff;
+    font-size: 11px; padding: 1px 8px; border-radius: 10px;
+  }
+  .cut.drop { margin: 4px 0; }
+  .cut.drop::before { border-top: 2px dotted var(--muted); }
+  .cut.drop::after { background: var(--muted); content: attr(data-label); }
+  .cut.keep { margin: 8px 0; }
+  .cut.keep::before { border-top: 2px solid var(--good); }
+  .cut.keep::after { background: var(--good); content: attr(data-label); }
+
+  /* 压缩带：左色条 + 半透明，覆盖整组"被压缩"的行 */
+  .compress-band {
+    position: relative;
+    margin: 4px 0 8px;
+    padding: 10px 14px 10px 18px;
+    background: repeating-linear-gradient(
+      45deg,
+      #fff7e6,
+      #fff7e6 8px,
+      #fdeed1 8px,
+      #fdeed1 16px
+    );
+    border: 1px dashed var(--warn);
+    border-radius: 8px;
+    font-size: 12px;
+    color: #6b4a14;
+  }
+  .compress-band .band-label {
+    display: inline-block;
+    background: var(--warn);
+    color: #fff;
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+  }
+  /* 压缩带里的 .timeline 行：去掉背景气泡，改为纯文字行，让序号一眼可见 */
+  .compress-band .timeline { padding-left: 110px; }
+  .compress-band .row .who span { background: transparent; padding: 0; color: var(--warn); font-weight: 600; }
+  .compress-band .row .bubble { background: transparent; border: none; color: #6b4a14; padding: 2px 0; max-width: 100%; }
+  .compress-band .row .bubble::before { display: none; }
+  .compress-band .row { padding: 2px 0; min-height: 24px; }
+  .compress-band .who { top: 2px; }
+  /* 保保留 */
+  .keep-band {
+    position: relative;
+    margin: 4px 0 8px;
+    padding: 10px 14px 10px 18px;
+    background: #ecf8f1;
+    border: 2px solid var(--good);
+    border-radius: 8px;
+    font-size: 12px;
+    color: #155c39;
+  }
+  .keep-band .band-label {
+    display: inline-block;
+    background: var(--good);
+    color: #fff;
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+  }
+  .keep-band .row .bubble::before { display: none; }
+  .cut-spot {
+    position: relative;
+    margin: 6px 0 6px 130px;
+    height: 22px;
+  }
+  .cut-spot::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 4px;
+    width: 14px; height: 14px;
+    border: 2px solid var(--bad);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(214,69,69,0.18);
+  }
+  .cut-spot::after {
+    content: attr(data-label);
+    position: absolute;
+    left: 22px;
+    top: 2px;
+    background: var(--bad);
+    color: #fff;
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+  }
+
+  /* 摘要气泡 */
+  .summary-bubble {
+    display: inline-block;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #fff7e6;
+    border: 1px solid #f1d59a;
+    font-size: 12.5px;
+    color: #6b4a14;
+    max-width: 92%;
+  }
+  .summary-bubble::before { content: "📝 摘要"; font-weight: 600; margin-right: 6px; }
+
+  .archive-block {
+    display: inline-block;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #fbf3e3;
+    border: 1px dashed var(--archive);
+    font-size: 12.5px;
+    color: #7a5418;
+    max-width: 92%;
+  }
+  .archive-block::before { content: "🗄 已读归档（result_ref）"; font-weight: 600; margin-right: 6px; }
+
+  /* 配对连线 */
+  .pair-row { position: relative; }
+  .pair-row .pair-line {
+    position: absolute;
+    left: -56px;
+    width: 50px;
+    border-left: 2px solid var(--purple);
+    border-bottom: 2px solid var(--purple);
+    border-bottom-left-radius: 10px;
+    pointer-events: none;
+  }
+  .pair-row .pair-label {
+    position: absolute;
+    left: -126px;
+    width: 70px;
+    text-align: right;
+    font-size: 11px;
+    color: var(--purple);
+  }
+
+  /* 结果区 */
+  .outcome {
+    margin-top: 14px; padding: 12px 14px; border-radius: 8px; font-size: 13px;
+  }
+  .outcome.bad { background: #fdecec; border: 1px solid #f4c1c1; color: #8a2a2a; }
+  .outcome.good { background: #ecf8f1; border: 1px solid #c4e6d2; color: #155c39; }
+  .outcome strong { display: block; margin-bottom: 4px; }
+
+  /* 三层保护卡片 */
+  .layers {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 8px;
+  }
+  .layer { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #fbfbff; }
+  .layer h3 { margin: 0 0 6px; font-size: 14px; color: var(--accent); }
+  .layer p { margin: 0; font-size: 13px; color: var(--muted); }
+  .layer .example {
+    margin-top: 8px; background: #fff; border: 1px dashed #c8cee0;
+    border-radius: 6px; padding: 8px 10px; font-size: 12.5px;
+  }
+
+  .turn {
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 10px; background: #fbfbff;
+  }
+  .turn h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .turn .timeline { margin: 4px 0; }
+
+  /* 多轮对比栏 */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .compare > div {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .compare h3 { margin: 0 0 8px; font-size: 15px; }
+  .compare .label {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 11px; margin-left: 6px; color: #fff;
+  }
+  .compare .label.bad { background: var(--bad); }
+  .compare .label.good { background: var(--good); }
+
+  /* 总结表 */
+  table.summary-table {
+    width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px;
+  }
+  table.summary-table th, table.summary-table td {
+    border: 1px solid var(--line); padding: 6px 10px; text-align: left;
+  }
+  table.summary-table th { background: #f3f4fa; font-weight: 600; }
+  table.summary-table tr.kept td { background: #ecf8f1; }
+  table.summary-table tr.summary td { background: #fff7e6; }
+  table.summary-table tr.archived td { background: #fbf3e3; }
+
+  @media (max-width: 800px) {
+    .compare { grid-template-columns: 1fr; }
+    .layers { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>上下文管理：按 Token 切的坏处 vs 我们项目的做法</h1>
+  <p>三张图：坏处 → 我们的保护 → 多轮实例。切断点明确、工具配对连了线、每条消息的归宿用颜色标。</p>
+</header>
+
+<main>
+
+  <!-- 图1：按 token 切的坏处 -->
+  <section>
+    <h2>① 按 Token 硬切：会把"一问一答"从中间撕开</h2>
+    <div class="sub">4 条消息：买家 1 条、工具调用 1 条、工具返回 1 条、模型回答 1 条。下面告诉你"切线具体落在哪两个气泡之间"。</div>
+    <div class="legend">
+      <span><i class="dot user"></i>买家消息</span>
+      <span><i class="dot tool"></i>工具调用 / 返回</span>
+      <span><i class="dot assistant"></i>模型回答</span>
+      <span><i class="dot bad"></i>被切的一侧</span>
+      <span><i class="dot good"></i>被保留的一侧</span>
+    </div>
+
+    <h3 style="font-size:14px; color:var(--muted); font-weight:600; margin-top:6px;">原始对话（4 条，按出现顺序）</h3>
+    <div class="timeline">
+      <div class="row user" data-i="1">
+        <div class="who"><span>① 买家</span></div>
+        <div class="bubble">帮我找个 200 元以内的保温杯，要<b>不锈钢、不要塑料</b>。</div>
+      </div>
+      <div class="row tool" data-i="2">
+        <div class="who"><span>② 工具调用</span></div>
+        <div class="bubble">search_products(material="不锈钢", max_price=200)</div>
+      </div>
+      <div class="row tool" data-i="3">
+        <div class="who"><span>③ 工具返回</span></div>
+        <div class="bubble">[P101 不锈钢 199 元, P102 不锈钢 188 元, P103 塑料 89 元 …]</div>
+      </div>
+      <div class="row assistant" data-i="4">
+        <div class="who"><span>④ 模型</span></div>
+        <div class="bubble">推荐 P101（199 元）和 P102（188 元）。两件都是不锈钢，塑料那件直接排除。</div>
+      </div>
+    </div>
+
+    <h3 style="font-size:14px; color:var(--bad); font-weight:600; margin-top:18px;">按 token 硬切后：切线落在"① 和 ② 之间"</h3>
+    <div class="timeline">
+      <div class="row user kept">
+        <div class="who"><span>① 买家</span></div>
+        <div class="bubble">帮我找个 200 元以内的保温杯，要<b>不锈钢、不要塑料</b>。 <span style="color:var(--good); font-weight:600;">[保留侧]</span></div>
+      </div>
+    </div>
+    <!-- 切点：落在 ①买家 与 ②工具调用 之间 -->
+    <div class="cut-spot" data-label="✂ 切线 ① 和 ② 之间"></div>
+    <div class="timeline" style="margin-top:6px;">
+      <div class="row tool cut">
+        <div class="who"><span>② 工具调用</span></div>
+        <div class="bubble">search_products(material="不<span style="background:var(--bad); color:#fff; padding:0 4px; border-radius:3px;">【被切到这里，后半段没了】</span></div>
+      </div>
+      <div class="row tool cut">
+        <div class="who"><span>③ 工具返回</span></div>
+        <div class="bubble">锈钢", max_price=200) — 返回 [P101 不锈钢 199, P102 不锈钢 188, P103 塑料 89 …]</div>
+      </div>
+      <div class="row assistant cut">
+        <div class="who"><span>④ 模型</span></div>
+        <div class="bubble">推荐 P103（89 元塑料）。</div>
+      </div>
+    </div>
+
+    <div class="outcome bad">
+      <strong>为什么坏：</strong>
+      切线落在 ① 买家 和 ② 工具调用 之间。结果就是：<br>
+      • 买家说"不要塑料"——留在了保留侧，模型能读到，<b>但工具调用参数被撕成两半</b>，模型只能看到"material=不"，调用彻底错位。<br>
+      • ② 调用 和 ③ 返回 没拆开（运气好），但 ② 调用本身已经废了，模型看到"<b>没有合理的调用却有返回</b>"，于是自己脑补了一个工具 → 把 P103 塑料推荐出来了。<br>
+      • 真正买家的硬约束"不要塑料"被切碎的参数淹没，结论彻底错。
+    </div>
+
+    <div class="outcome bad" style="margin-top:8px;">
+      <strong>另一种坏切（把切线挪到 ③ 和 ④ 之间）：</strong>
+      <br>这次坏处在另一头——④ 模型回答被切，模型读到"工具返回里有塑料 P103"但<b>没有"塑料已被排除"这条推理过程</b>，于是又把塑料推荐给买家。
+    </div>
+  </section>
+
+  <!-- 图2：我们项目的三层保护 -->
+  <section>
+    <h2>② 我们项目的做法：先画"不能切"的边界，再让 SDK 摘要</h2>
+    <div class="sub">核心思路：把"切哪里"从"按 token"改成"按对话结构"。下面用同一段对话，左边复刻坏处那张，右边演示我们的切法。</div>
+
+    <div class="layers">
+      <div class="layer">
+        <h3>第一层 · 按轮次切，不按 token</h3>
+        <p>保留当前轮 + 前两轮的完整原文，再往前才允许被摘要。</p>
+        <div class="example">买家的"问 + 答"永远完整成对。</div>
+      </div>
+      <div class="layer">
+        <h3>第二层 · 工具调用配对保留</h3>
+        <p>工具调用（ToolCall）和它的返回（ToolResult）必须留在同一侧。</p>
+        <div class="example">切到的边界往回挪，宁可多留几条也不拆对。</div>
+      </div>
+      <div class="layer">
+        <h3>第三层 · 当前轮神圣不可切</h3>
+        <p>买家这一轮还在问、还没收尾的那段消息，永远完整保留。</p>
+        <div class="example">只有"完整收尾之后"的旧轮次才有资格被摘要。</div>
+      </div>
+    </div>
+
+    <div class="compare" style="margin-top: 18px;">
+      <!-- 左：SDK 默认 -->
+      <div>
+        <h3>左：SDK 默认按 token 切 <span class="label bad">坏处</span></h3>
+        <div class="timeline">
+          <div class="row user" data-i="1">
+            <div class="who"><span>① 买家</span></div>
+            <div class="bubble">帮我找个 200 元以内的保温杯，要<b>不锈钢、不要塑料</b>。</div>
+          </div>
+          <div class="row tool" data-i="2">
+            <div class="who"><span>② 工具调用</span></div>
+            <div class="bubble">search_products(material="不锈钢", max_price=200)</div>
+          </div>
+          <div class="row tool" data-i="3">
+            <div class="who"><span>③ 工具返回</span></div>
+            <div class="bubble">[P101 199, P102 188, P103 89 塑料…]</div>
+          </div>
+          <div class="row assistant" data-i="4">
+            <div class="who"><span>④ 模型</span></div>
+            <div class="bubble">推荐 P101 和 P102。</div>
+          </div>
+        </div>
+        <div class="cut-spot" data-label="✂ ① 和 ② 之间"></div>
+        <div class="timeline" style="margin-top:6px;">
+          <div class="row user kept">
+            <div class="who"><span>①</span></div>
+            <div class="bubble">…不要塑料。 <span style="color:var(--good);">[保留]</span></div>
+          </div>
+          <div class="row tool cut">
+            <div class="who"><span>②</span></div>
+            <div class="bubble">search_products(material="不<span style="background:var(--bad); color:#fff;">【被切】</span></div>
+          </div>
+          <div class="row tool cut">
+            <div class="who"><span>③</span></div>
+            <div class="bubble">锈钢"…) — [P101, P102, P103 塑料…]</div>
+          </div>
+          <div class="row assistant cut">
+            <div class="who"><span>④</span></div>
+            <div class="bubble">推荐 P103（塑料 89）。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：我们的切法 -->
+      <div>
+        <h3>右：我们按对话边界切 <span class="label good">保护</span></h3>
+        <div class="timeline">
+          <div class="row user kept" data-i="1">
+            <div class="who"><span>① 买家</span></div>
+            <div class="bubble">帮我找个 200 元以内的保温杯，要<b>不锈钢、不要塑料</b>。</div>
+          </div>
+          <div class="row tool kept pair-row" data-i="2" style="position:relative;">
+            <div class="who"><span>② 工具调用</span></div>
+            <div class="bubble">search_products(material="不锈钢", max_price=200)</div>
+            <!-- 配对线：用 SVG 跨两条消息更准 -->
+            <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88">
+              <path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/>
+              <text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text>
+            </svg>
+          </div>
+          <div class="row tool kept pair-row" data-i="3">
+            <div class="who"><span>③ 工具返回</span></div>
+            <div class="bubble">[P101 199, P102 188, P103 89 塑料…]</div>
+          </div>
+          <div class="row assistant kept" data-i="4">
+            <div class="who"><span>④ 模型</span></div>
+            <div class="bubble">推荐 P101 和 P102。</div>
+          </div>
+        </div>
+        <div style="font-size:11px; color:var(--purple); margin: 2px 0 6px 130px;">↑ 紫色虚线把 ② 调用 与 ③ 返回 连在一起——它们是同一对，不能拆。</div>
+        <div class="cut-spot" data-label="✂ 切线落在 ④ 之后"></div>
+        <div class="timeline" style="margin-top:6px;">
+          <div class="row summary">
+            <div class="who"><span>旧轮</span></div>
+            <div class="bubble"><span class="summary" style="background:transparent; border:none; padding:0;">买家想买 200 元以内的保温杯，要不锈钢、不要塑料。</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="outcome good">
+      <strong>配对关系（看右边紫色虚线）：</strong>
+      <br>② 工具调用 ↔ ③ 工具返回 —— 一对，<b>永远同时保留或同时消失</b>。
+      <br>① 买家 ↔ ④ 模型 —— 一对，<b>一问一答完整保留</b>，不能把问留在保留侧、答留在摘要侧。
+      <br>切线落在 ④ 模型回答之后 —— 因为 ④ 是当前轮的最后一条，且 ②③ 已配对完整，<b>再往前都是上一轮的旧对话</b>，可以安全摘要。
+    </div>
+  </section>
+
+  <!-- 图3：多轮对话实例 -->
+  <section>
+    <h2>③ 多轮对话实例：22 轮聊下来，哪些被压、哪些保留</h2>
+    <div class="sub">买家这一会话里聊了四类商品：保温杯 → 登山鞋 → 冲锋衣 → 又回来看保温杯 → 收货国家 / 库存 / 包装等杂项。下面给你按出现顺序编号，告诉你哪个区间进压缩、哪个区间保留。</div>
+    <div class="legend">
+      <span><i class="dot user"></i>买家消息</span>
+      <span><i class="dot tool"></i>工具调用 / 返回</span>
+      <span><i class="dot assistant"></i>模型回答</span>
+      <span style="color:var(--warn); font-weight:600;">🔥 = 切换话题/重启需求</span>
+    </div>
+
+    <!-- 第一步：22 轮分组 -->
+    <div class="turn">
+      <h4>完整对话（22 轮，约 70 条消息，按顺序）</h4>
+      <div class="timeline" style="font-size:12.5px;">
+        <!-- ========== 段 1：保温杯 轮 1 - 4 ========== -->
+        <div style="margin:6px 0 2px; font-size:11px; color:var(--accent); font-weight:600;">▼ 段 1：保温杯（轮 1 - 4）</div>
+        <div class="row user"><div class="who"><span>①</span></div><div class="bubble">我想买个保温杯。</div></div>
+        <div class="row assistant"><div class="who"><span>②</span></div><div class="bubble">好的，要什么价位？什么场景？</div></div>
+        <div class="row user"><div class="who"><span>③</span></div><div class="bubble">预算 200 元以内。要<b>不锈钢、不要塑料</b>。</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>④</span></div><div class="bubble">search_products(material="不锈钢", max_price=200)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>⑤</span></div><div class="bubble">[P101 不锈钢 199, P102 不锈钢 188, P103 塑料 89 …]</div></div>
+        <div class="row assistant"><div class="who"><span>⑥</span></div><div class="bubble">推荐 P101 和 P102，都是不锈钢。</div></div>
+        <div class="row user"><div class="who"><span>⑦</span></div><div class="bubble">P101 容量多大？保温几小时？</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>⑧</span></div><div class="bubble">get_product_detail(P101)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>⑨</span></div><div class="bubble">{容量: 500ml, 保温: 12h, 材质: 不锈钢}</div></div>
+        <div class="row assistant"><div class="who"><span>⑩</span></div><div class="bubble">500ml / 12 小时 / 不锈钢。</div></div>
+        <div class="row user"><div class="who"><span>⑪</span></div><div class="bubble">会不会太重？出差带。</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>⑫</span></div><div class="bubble">get_weight(P101)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>⑬</span></div><div class="bubble">{净重: 280g}</div></div>
+        <div class="row assistant"><div class="who"><span>⑭</span></div><div class="bubble">280g，出差背着不重。</div></div>
+
+        <!-- ========== 段 2：登山鞋 轮 5 - 8 ========== -->
+        <div style="margin:14px 0 2px; font-size:11px; color:var(--accent); font-weight:600;">▼ 段 2：登山鞋（轮 5 - 8）<span style="color:var(--warn); margin-left:8px;">🔥 切换话题</span></div>
+        <div class="row user"><div class="who"><span>⑮</span></div><div class="bubble">算了先不想保温杯了。帮我也看看<b>登山鞋</b>。</div></div>
+        <div class="row assistant"><div class="who"><span>⑯</span></div><div class="bubble">好的，登山场景？价位？</div></div>
+        <div class="row user"><div class="who"><span>⑰</span></div><div class="bubble">周末郊山徒步，预算 600。防水、防滑。</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>⑱</span></div><div class="bubble">search_products(category="登山鞋", waterproof=true, max_price=550)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>⑲</span></div><div class="bubble">[S201 防水 549, S202 防水 499, S203 不防水 399 …]</div></div>
+        <div class="row assistant"><div class="who"><span>⑳</span></div><div class="bubble">S201 和 S202 都是防水款。</div></div>
+        <div class="row user"><div class="who"><span>㉑</span></div><div class="bubble">S201 鞋底是什么材质？抓地力怎样？</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㉒</span></div><div class="bubble">get_product_detail(S201)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㉓</span></div><div class="bubble">{鞋底: Vibram 橡胶, 重量: 880g/只, 防水膜: Gore-Tex}</div></div>
+        <div class="row assistant"><div class="who"><span>㉔</span></div><div class="bubble">Vibram 大底 + Gore-Tex 防水膜，单只 880g。</div></div>
+
+        <!-- ========== 段 3：冲锋衣 轮 9 - 12 ========== -->
+        <div style="margin:14px 0 2px; font-size:11px; color:var(--accent); font-weight:600;">▼ 段 3：冲锋衣（轮 9 - 12）<span style="color:var(--warn); margin-left:8px;">🔥 又换话题</span></div>
+        <div class="row user"><div class="who"><span>㉕</span></div><div class="bubble">行，登山鞋先放着。再看看<b>冲锋衣</b>，要能扛得住登山那种雨。</div></div>
+        <div class="row assistant"><div class="who"><span>㉖</span></div><div class="bubble">好。要硬壳还是软壳？预算？</div></div>
+        <div class="row user"><div class="who"><span>㉗</span></div><div class="bubble">硬壳。预算 1500。要 GORE-TEX 面料。</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㉘</span></div><div class="bubble">search_products(category="冲锋衣", shell="硬壳", material="GORE-TEX", max_price=1500)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㉙</span></div><div class="bubble">[J301 GT 1499, J302 GT 1399, J303 非 GT 999 …]</div></div>
+        <div class="row assistant"><div class="who"><span>㉚</span></div><div class="bubble">J301 和 J302 都是 GORE-TEX。</div></div>
+        <div class="row user"><div class="who"><span>㉛</span></div><div class="bubble">J301 的防水等级？淋雨 2 小时行不行？</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㉜</span></div><div class="bubble">get_product_detail(J301)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㉝</span></div><div class="bubble">{防水等级: 20000mm, 透湿率: 15000g/m²/24h}</div></div>
+        <div class="row assistant"><div class="who"><span>㉞</span></div><div class="bubble">20000mm 防水 + 15000 透湿，淋雨 2 小时没问题。</div></div>
+
+        <!-- ========== 段 4：回到保温杯 轮 13 - 15 ========== -->
+        <div style="margin:14px 0 2px; font-size:11px; color:var(--accent); font-weight:600;">▼ 段 4：又回来看保温杯（轮 13 - 15）</div>
+        <div class="row user"><div class="who"><span>㉟</span></div><div class="bubble">回来再看下<b>保温杯 P101</b>，刚才忘了问能不能装下 750ml 的大瓶。</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㊱</span></div><div class="bubble">get_product_detail(P101) [result_ref=ev-001 命中，已读归档直接复用]</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㊲</span></div><div class="bubble">[归档命中] {容量: 500ml}</div></div>
+        <div class="row assistant"><div class="who"><span>㊳</span></div><div class="bubble">P101 容量 500ml，750ml 装不下。</div></div>
+        <div class="row user"><div class="who"><span>㊴</span></div><div class="bubble">那就 P102 吧，500ml 也够用。先收藏，回头再决定。</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㊵</span></div><div class="bubble">add_favorite(product_id=P102)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㊶</span></div><div class="bubble">{ok: true, favorite_id: "F-9982"}</div></div>
+        <div class="row assistant"><div class="who"><span>㊷</span></div><div class="bubble">已收藏 P102。</div></div>
+
+        <!-- ========== 段 5：杂项 轮 16 - 22 ========== -->
+        <div style="margin:14px 0 2px; font-size:11px; color:var(--accent); font-weight:600;">▼ 段 5：收货国家 / 库存 / 包装等杂项（轮 16 - 22）</div>
+        <div class="row user"><div class="who"><span>㊸</span></div><div class="bubble">顺便问一下，<b>寄到日本</b>运费多少？</div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㊹</span></div><div class="bubble">estimate_shipping(destination="JP", weight=280g)</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㊺</span></div><div class="bubble">{运费: 38 元, 时效: 5-7 天}</div></div>
+        <div class="row assistant"><div class="who"><span>㊻</span></div><div class="bubble">寄日本 38 元，5-7 天到。</div></div>
+        <div class="row user"><div class="who"><span>㊼</span></div><div class="bubble">P102 现在 <b>有货吗？</b></div></div>
+        <div class="row tool pair-row" style="position:relative;">
+          <div class="who"><span>㊽</span></div><div class="bubble">check_stock(P102, destination="JP")</div>
+          <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+        </div>
+        <div class="row tool pair-row"><div class="who"><span>㊾</span></div><div class="bubble">{stock: 12, can_ship_to_JP: true}</div></div>
+        <div class="row assistant"><div class="who"><span>㊿</span></div><div class="bubble">有货，可发日本。</div></div>
+        <div class="row user"><div class="who"><span>51</span></div><div class="bubble">包装结实吗？摔过会破吗？</div></div>
+        <div class="row assistant"><div class="who"><span>52</span></div><div class="bubble">P102 标准纸盒 + 气柱袋包装，运输中正常摔碰不会破。</div></div>
+        <div class="row user"><div class="who"><span>53</span></div><div class="bubble">好。今天就到这里，谢谢。</div></div>
+        <div class="row assistant"><div class="who"><span>54</span></div><div class="bubble">好的，随时回来。需要的时候叫我。</div></div>
+      </div>
+    </div>
+
+    <!-- 第二步：项目实际规则 -->
+    <div class="outcome" style="background:#fffbe6; border:1px solid #f1d59a;">
+      <strong>本项目实际规则（来自 <code>protected_start</code>）：</strong>
+      <br>"<b>当前轮 + 两个已完成轮</b>" 共 <b>3 轮</b> 完整保留，再往前才进摘要。
+      <br>当前轮是轮 22（53 + 54），前两个已完成轮是轮 21（51 + 52）和轮 20（㊼-㊿）。
+      <br>所以 <b>45 - 54</b> 共 10 条完整保留；<b>① - 44</b> 进压缩。
+    </div>
+
+    <!-- 第三步：压缩结果可视化 -->
+    <div class="turn" style="background:#f7faff; border-color:#cfdcff;">
+      <h4 style="color:var(--accent);">压缩后的最终样子</h4>
+
+      <!-- 保留带 -->
+      <div class="keep-band">
+        <span class="band-label">完整保留（3 轮 = 10 条）</span>
+        <div style="font-size:12px; margin-bottom:6px;">编号 <b>45 - 54</b>，当前对话最关键的细节一个不丢。</div>
+        <div class="timeline">
+          <div class="row user kept"><div class="who"><span>㊼</span></div><div class="bubble">P102 现在<b>有货吗？</b></div></div>
+          <div class="row tool kept pair-row" style="position:relative;">
+            <div class="who"><span>㊽</span></div><div class="bubble">check_stock(P102, destination="JP")</div>
+            <svg style="position:absolute; left:-118px; top:14px; width:110px; height:88px; pointer-events:none;" viewBox="0 0 110 88"><path d="M 100 0 C 30 0, 30 78, 100 78" stroke="#6f4cd1" stroke-width="2" fill="none" stroke-dasharray="4 3"/><text x="20" y="44" font-size="11" fill="#6f4cd1" font-weight="600">配对</text></svg>
+          </div>
+          <div class="row tool kept pair-row"><div class="who"><span>㊾</span></div><div class="bubble">{stock: 12, can_ship_to_JP: true}</div></div>
+          <div class="row assistant kept"><div class="who"><span>㊿</span></div><div class="bubble">有货，可发日本。</div></div>
+
+          <div class="row user kept"><div class="who"><span>51</span></div><div class="bubble">包装结实吗？摔过会破吗？</div></div>
+          <div class="row assistant kept"><div class="who"><span>52</span></div><div class="bubble">标准纸盒 + 气柱袋包装，正常摔碰不会破。</div></div>
+
+          <div class="row user kept"><div class="who"><span>53</span></div><div class="bubble">好。今天就到这里，谢谢。</div></div>
+          <div class="row assistant kept"><div class="who"><span>54</span></div><div class="bubble">好的，随时回来。</div></div>
+        </div>
+      </div>
+
+      <!-- 压缩带 -->
+      <div class="compress-band">
+        <span class="band-label">被摘要（19 个段落 = 44 条）</span>
+        <div style="font-size:12px; margin-bottom:6px;">编号 <b>① - 44</b>（保温杯 4 段、冲锋衣、登山鞋、回到保温杯），全部原文消失，只留下面的摘要。</div>
+        <div style="margin-top:8px;">
+          <span class="summary-bubble">买家为出行买东西过保温杯、出差用 / 也看了看，登山鞋 S201 / 冲锋衣 J301 / 最终选了保温杯 P102，收藏了 / 本次选购预算 200元、不要塑料、寄日本。买家原话：P102 容量 500ml，寄日本。</span>
+        </div>
+      </div>
+
+      <div class="outcome good" style="margin-top:14px;">
+        <strong>结论（一句话版）：</strong>
+        <br>• <b>保留侧：</b>45 到 54，共 3 轮 10 条原文。
+        <br>• <b>压缩侧：</b>① 到 44，被压成 1 行摘要（买家看过哪几样/绕一圈/选了哪样/本次预算/收货国家）。
+        <br>• <b>切割边界：</b>落在 44 和 45 之间—— 44 是旧轮 19 的尾巴，45 是轮 20 的起点，符合"按对话边界切，不按 token 切"。
+      </div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

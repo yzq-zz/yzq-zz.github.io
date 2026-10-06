@@ -21,6 +21,13 @@ export default defineConfig({
         ]
       },
       {
+        text: '操作系统',
+        collapsed: false,
+        items: [
+          { text: '进程 vs 线程', link: '/os/process-vs-thread' }
+        ]
+      },
+      {
         text: 'Agent知识',
         collapsed: false,
         items: [
@@ -31,6 +38,7 @@ export default defineConfig({
         text: 'Agent项目',
         collapsed: false,
         items: [
+          { text: '4. 上下文管理策略', link: '/context-management-strategy' },
           { text: '11. 商品搜索工具：生产级检索链路', link: '/agent-project/product-search' },
           { text: '13. CategoryInsight工具：品类知识RAG', link: '/agent-project/category-insight' }
         ]

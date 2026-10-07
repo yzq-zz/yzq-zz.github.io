@@ -212,16 +212,38 @@ chunk_content  →  embedding_model.encode(text)  →  vector[1024 dim]
    ↓
 ③ 点名文档补查:query 明确点名某文档/政策地域,缺失时在该文档内向量重查
    ↓
-④ 按 document_id 去重:每篇文档只保留一个 chunk
+④ 按 document_id 去重:top_k 的单位是"来源数"不是"chunk 数"
    ↓
-返回 top_k 条 insight(每条对应一篇文档的一个 chunk)
+返回 top_k 条 insight(每条来自不同的 document_id)
 ```
 
-**候选数和最终返回数是两个预算**。`top_k=3` 时,先召回 24 个候选向量,去重后剩 3-5 篇文档,每篇留最相关的那个 chunk。
+**候选数和最终返回数是两个预算**。`top_k=3` 时,先召回 24 个候选向量,去重后按"不同 document_id"凑齐 3 个。
 
-**Top-K 指的是文档数,不是 chunk 数**。每条 insight 是一篇文档的一个最相关 chunk,因为同一文档的多个 chunk 按 document_id 去重只留一个。
+**Top-K 的单位是"来源数"(distinct document_id 数),不是 chunk 数**。每条 insight 来自一篇文档,一篇文档只露最相关那一个 chunk,即使它有 5 个 chunk 入库。
 
-### 13.5.3 一个具体的召回例子
+### 13.5.3 按 document_id 去重:为什么这样做
+
+这是当前召回链路的**核心设计权衡**,不是 bug。两种取舍:
+
+**当前设计:top_k = 来源数(按 document_id 去重)**
+
+- top_k=3 表示"3 个不同来源的判断",Agent 拿到的是"3 篇文档各给一个最相关 chunk"
+- 同文档多个 chunk 只留最相关那一个,跨章节问题需要 Agent 分多次查
+- 工具 prompt / 评测都按"top_k = 来源数"语义设计
+
+**备选设计:top_k = chunk 数(不去重)**
+
+- top_k=3 表示"3 个 chunk",Agent 拿到 3 段原文,可能来自 1-3 篇文档
+- 跨章节问题一次查就拿到所有相关 chunk,信息密度更高
+- 缺点:top_k=3 可能全是同一篇 travel-gear 的不同章节,Agent 拿不到跨文档交叉验证
+
+**为什么选当前设计**:
+
+1. **同一文档不同章节属于同一证据视角**,不构成"独立证据"。比如 travel-gear 的"材质"和"价格"都是同一来源对旅行装备的判断,不算两个独立证据
+2. **不去重会让 top_k 全是同一文档的不同章节**,Agent 看到的"3 段内容"其实只是"同一文档复读",广度下降
+3. **跨章节问题是 Agent 层的事**:把"材质 + 价格"拆成两次更具体的查询,分别拿到证据,而不是让一次召回返回两份同一来源的章节
+
+### 13.5.4 一个具体的召回例子
 
 **场景**:`travel-gear.md` 已经入库,切成 5 个 chunk(对应 `## 品类定位 / ## 当前热卖款型 / ## 关键属性与判断口径 / ## 价格区间参考 / ## 避坑点` 五个章节,每个 chunk 贴了 `【旅行装备品类洞察 / <章节名>】` 前缀)。
 
@@ -248,11 +270,12 @@ chunk_content  →  embedding_model.encode(text)  →  vector[1024 dim]
 ③ 点名文档补查:query 没明确点名某文档 → 跳过
 
 ④ 按 document_id 去重:
-   同一篇 travel-gear 的 5 个 chunk 只留最相关那一个
-   最终剩 top_k=3 个 chunk:
+   同一篇 travel-gear 的 5 个 chunk 只留最相关那一个(关键属性与判断口径)
+   其他品类的 chunk 各贡献 1 个
+   最终凑齐 top_k=3 条 distinct document_id 的 insight:
      1. travel-gear / 关键属性与判断口径  ← "三件套全套 400g 上下算轻便"
-     2. travel-gear / 当前热卖款型
-     3. digital-accessories / 某相关 chunk
+     2. digital-accessories / 某相关 chunk
+     3. home-living / 某相关 chunk
 
 返回的 insight 结构(每条):
   {
@@ -274,7 +297,7 @@ chunk_content  →  embedding_model.encode(text)  →  vector[1024 dim]
   }
 ```
 
-### 13.5.4 资料不足与服务故障分开处理
+### 13.5.5 资料不足与服务故障分开处理
 
 四种情况返回不同的结构:
 
@@ -293,7 +316,7 @@ chunk_content  →  embedding_model.encode(text)  →  vector[1024 dim]
 - 命中的段落直接当 insight 返回,`score` 是词项重合比例,**不能跟向量相似度直接比较**
 - 降级可能返回同一文档的多个段落
 
-### 13.5.5 原始证据的含义
+### 13.5.6 原始证据的含义
 
 工具负责检索与封装,**不计算最低价、中位价或属性分布**。Agent 拿到 `content` 后,可以解释资料里的价位参考;要算"当前品类商品统计",必须另外准备同币种、同规格、同时间口径的数据,不能在知识库返回的样本上做推断。
 

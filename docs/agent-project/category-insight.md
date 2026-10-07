@@ -221,80 +221,237 @@ chunk_content  →  embedding_model.encode(text)  →  vector[1024 dim]
 
 **Top-K 的单位是"来源数"(distinct document_id 数),不是 chunk 数**。每条 insight 来自一篇文档,一篇文档只露最相关那一个 chunk,即使它有 5 个 chunk 入库。
 
-### 13.5.3 按 document_id 去重:为什么这样做
+### 13.5.3 top_k 的单位:来源数
 
-这是当前召回链路的**核心设计权衡**,不是 bug。两种取舍:
+`top_k=3` 表示返回 3 条来自**不同 document_id** 的 insight。一篇文档只露最相关那一个 chunk,即使它有 5 个 chunk 入库。`top_k` 在工具 prompt / 评测里都按"来源数"语义使用。
 
-**当前设计:top_k = 来源数(按 document_id 去重)**
+### 13.5.4 一个完整的例子:从离线入库到 Agent 拿到回答
 
-- top_k=3 表示"3 个不同来源的判断",Agent 拿到的是"3 篇文档各给一个最相关 chunk"
-- 同文档多个 chunk 只留最相关那一个,跨章节问题需要 Agent 分多次查
-- 工具 prompt / 评测都按"top_k = 来源数"语义设计
+**场景**:用户问"旅行三件套怎么选",主 Agent 先调 `category_insight_tool`,再根据知识里的判断口径调 `product_search`。下面走一遍从离线到在线的完整流程。
 
-**备选设计:top_k = chunk 数(不去重)**
+#### 第一步:离线入库(应用启动时跑一次)
 
-- top_k=3 表示"3 个 chunk",Agent 拿到 3 段原文,可能来自 1-3 篇文档
-- 跨章节问题一次查就拿到所有相关 chunk,信息密度更高
-- 缺点:top_k=3 可能全是同一篇 travel-gear 的不同章节,Agent 拿不到跨文档交叉验证
+`knowledge/travel-gear.md` 是这样一篇文档:
 
-**为什么选当前设计**:
+```markdown
+# 旅行装备品类洞察
 
-1. **同一文档不同章节属于同一证据视角**,不构成"独立证据"。比如 travel-gear 的"材质"和"价格"都是同一来源对旅行装备的判断,不算两个独立证据
-2. **不去重会让 top_k 全是同一文档的不同章节**,Agent 看到的"3 段内容"其实只是"同一文档复读",广度下降
-3. **跨章节问题是 Agent 层的事**:把"材质 + 价格"拆成两次更具体的查询,分别拿到证据,而不是让一次召回返回两份同一来源的章节
+## 品类定位
+旅行装备覆盖收纳(收纳袋、压缩袋、行李箱)、舒适(颈枕、眼罩、睡袋内胆)三大子类。
 
-### 13.5.4 一个具体的召回例子
+## 当前热卖款型
+- 旅行三件套(收纳袋 + 颈枕 + 眼罩):长途飞行刚需组合...
+- 20 寸铝框登机箱:商务与短途首选...
+- 桑蚕丝睡袋内胆:酒店青旅与露营场景通用...
 
-**场景**:`travel-gear.md` 已经入库,切成 5 个 chunk(对应 `## 品类定位 / ## 当前热卖款型 / ## 关键属性与判断口径 / ## 价格区间参考 / ## 避坑点` 五个章节,每个 chunk 贴了 `【旅行装备品类洞察 / <章节名>】` 前缀)。
+## 关键属性与判断口径
+- 自重:三件套全套 400g 上下算轻便;双肩包 400g 以内属超轻...
+- 耐用性:看框架材质(铝框优于纯 PC)、缝线密度...
 
-**用户问**:"旅行三件套自重 400g 以下算什么"
+## 价格区间参考(人民币)
+- 旅行三件套:80-150 元入门,180-260 元主力...
+- 20 寸登机箱:500-700 元入门,800-1200 元主力...
+
+## 避坑点
+- 标称"皮质"的低价箱包多为 PU 涂层...
+- 登机箱尺寸各航司口径不同...
+```
+
+启动时 `bootstrap_category_knowledge` 跑起来:
+
+1. 按 `## ` 标题切,得到 5 个 section(对应 5 个章节)
+2. 每个 section 都 ≤ 512 token,不触发第三步切块
+3. 每个 chunk 的 content 前面贴 `【旅行装备品类洞察 / <章节名>】` 前缀
+4. 每个 chunk 单独 Embedding,得到 1024 维向量
+5. 5 个 chunk 全部写入 Qdrant 的 `category_kb_collection`,共享 `document_id="travel-gear"`,各自带 `parent_section` 字段
+
+入库后,Qdrant 里 5 条记录大致是这样(简化展示):
 
 ```
-① 边界规则:不是汇率/明价/具体股票等预设不可回答类 → 继续
+Qdrant point 1:
+  vector: [0.12, -0.34, ...]
+  payload:
+    content: "【旅行装备品类洞察 / 品类定位】旅行装备覆盖收纳..."
+    document_id: "travel-gear"
+    chunk_index: 0
+    parent_section: "品类定位"
+    topic: "category"
+    ...
+
+Qdrant point 2:
+  vector: [...]
+  payload:
+    content: "【旅行装备品类洞察 / 当前热卖款型】- 旅行三件套..."
+    document_id: "travel-gear"
+    parent_section: "当前热卖款型"
+    ...
+
+Qdrant point 3-5: 类似,对应"关键属性"/"价格"/"避坑"
+```
+
+#### 第二步:用户提问 → 主 Agent 决策
+
+```
+[对话界面]
+[user] 旅行三件套怎么选
+```
+
+主 Agent 看到 Prompt 规则("选购常识问题先查 category_insight,再查 product_search"),判断"旅行三件套怎么选"属于选购常识,**决定先调 `category_insight_tool`**,传:
+
+```
+tool_calls: [{name: "category_insight_tool", args: {question: "旅行三件套怎么选", top_k: 3}}]
+```
+
+#### 第三步:工具内召回(13.5.2 的四步链路)
+
+```
+① 边界规则检查:"旅行三件套怎么选"不是汇率/明价/具体股票等不可回答类 → 继续
 
 ② Qdrant 向量召回:
-   query 向量 = embedding("旅行三件套自重 400g 以下算什么")
-   ↕ cosine 相似度
-   Qdrant 里所有 chunk(各品类所有 chunk)按相似度排序
-   取前 min(80, 3 × 8) = 24 个候选
+   query 向量 = embedding("旅行三件套怎么选")
+   Qdrant 里所有 chunk 按相似度排序,取前 min(80, 3*8) = 24 个
    
-   假设召回的 24 个候选里:
-     - travel-gear / 关键属性与判断口径  ← 最相关,score 0.78
-     - travel-gear / 当前热卖款型        ← 次相关,score 0.61
-     - travel-gear / 价格区间参考        ← 0.42
-     - travel-gear / 避坑点              ← 0.31
-     - travel-gear / 品类定位            ← 0.28
-     - digital-accessories / ...         ← 0.25 等
-     - 其他品类各种 chunk                ← 0.20 以下
+   假设这 24 个里:
+     - travel-gear / 关键属性与判断口径  ← score 0.72
+     - travel-gear / 当前热卖款型        ← 0.58
+     - travel-gear / 价格区间参考        ← 0.41
+     - travel-gear / 避坑点              ← 0.33
+     - travel-gear / 品类定位            ← 0.29
+     - digital-accessories / 关键属性    ← 0.24
+     - home-living / 当前热卖款型        ← 0.22
+     - cross-border-guide / 关税通则     ← 0.21
+     - 其他 < 0.20 被拒答门槛筛掉
 
 ③ 点名文档补查:query 没明确点名某文档 → 跳过
 
 ④ 按 document_id 去重:
-   同一篇 travel-gear 的 5 个 chunk 只留最相关那一个(关键属性与判断口径)
-   其他品类的 chunk 各贡献 1 个
-   最终凑齐 top_k=3 条 distinct document_id 的 insight:
-     1. travel-gear / 关键属性与判断口径  ← "三件套全套 400g 上下算轻便"
-     2. digital-accessories / 某相关 chunk
-     3. home-living / 某相关 chunk
+   - travel-gear 出现 5 次 → 只留 1 个(关键属性与判断口径, score 0.72)
+   - digital-accessories 出现 1 次 → 留
+   - home-living 出现 1 次 → 留
+   - cross-border-guide 出现 1 次 → 留
+   
+   凑齐 top_k=3 条,按 score 排序:
+     1. travel-gear / 关键属性与判断口径   (0.72)
+     2. digital-accessories / 关键属性      (0.24)
+     3. cross-border-guide / 关税通则       (0.21)
+```
 
-返回的 insight 结构(每条):
-  {
-    content: "【旅行装备品类洞察 / 关键属性与判断口径】自重:三件套全套 400g 上下算轻便;...",
-    source: "travel-gear.md",
-    score: 0.78,
-    metadata: {
-      source_reference: "...",
-      source_type: "...",
-      published_at: "...",
-      effective_from: "...",
-      effective_to: "...",
-      region: "GLOBAL",
-      version: "...",
-      topic: "category",
-      parent_section: "关键属性与判断口径"
+`search_knowledge` 返回的就是这 3 条 SDK 内部结果。
+
+#### 第四步:工具封装成 JSON
+
+代码把 SDK 对象转成 Agent 能吃的 JSON,**没有"提取结构化字段"这一步**:
+
+```json
+{
+  "insights": [
+    {
+      "content": "【旅行装备品类洞察 / 关键属性与判断口径】自重:三件套全套 400g 上下算轻便;耐用性:看框架材质(铝框优于纯 PC)、缝线密度;...",
+      "source": "travel-gear.md",
+      "score": 0.72,
+      "metadata": {
+        "source_type": "...",
+        "effective_from": "2026-08-01",
+        "effective_to": "2026-12-31",
+        "topic": "category",
+        "parent_section": "关键属性与判断口径"
+      },
+      "policy_fact_status": "not_policy"
     },
-    policy_fact_status: "not_policy"
-  }
+    {
+      "content": "【数码配件品类洞察 / 关键属性与判断口径】...",
+      "source": "digital-accessories.md",
+      "score": 0.24,
+      "metadata": {...},
+      "policy_fact_status": "not_policy"
+    },
+    {
+      "content": "【跨境通则 / 关税】旅行装备属常规税率档,单笔金额压在免税额度内可显著降低到手价...",
+      "source": "cross-border-guide.md",
+      "score": 0.21,
+      "metadata": {
+        "source_type": "...",
+        "topic": "policy",
+        ...
+      },
+      "policy_fact_status": "non_authoritative_source"
+    }
+  ]
+}
+```
+
+注意几点:
+
+- **没有 `bestsellers / attributes / price_tiers` 这种结构化字段**
+- `policy_fact_status` 是工具层加的,SDK 没有
+- `cross-border-guide` 那条 `policy_fact_status = non_authoritative_source`,因为 manifest 里 `source_type=synthetic_evaluation_fixture`,不是 official_snapshot
+
+#### 第五步:ToolChunk 塞回主 Agent 对话
+
+AgentScope 框架自动把这段 JSON 作为工具结果塞回主 Agent 的对话历史:
+
+```
+[对话历史]
+[system] 你是 Globex 跨境电商助手...
+[user] 旅行三件套怎么选
+[assistant] {tool_calls: [{name: "category_insight_tool", ...}]}
+[tool result] {上面那段 JSON}
+[assistant 继续]   ← 主 Agent 大模型接着生成
+```
+
+#### 第六步:主 Agent 大模型拼回答
+
+主 Agent 接着生成下一条 assistant 消息,**直接读 `insights[].content`**,把要点总结成自然语言,**没有"提取结构化字段"这一步**:
+
+```
+旅行三件套选购可以关注三个维度:
+ 1. 自重 — 三件套全套 400g 上下算轻便(travel-gear.md / 关键属性与判断口径)
+ 2. 耐用性 — 看框架材质(铝框优于纯 PC)、缝线密度(同上来源)
+ 3. 关税 — 旅行装备属常规税率档,单笔压在免税额度内更划算
+    (cross-border-guide.md,但该资料不是官方快照,具体额度需查官方)
+
+资料来源:travel-gear.md / digital-accessories.md / cross-border-guide.md
+```
+
+**这里大模型做的是**:
+
+- 读 3 条 `insights[].content` 的原文
+- 提炼出"自重 / 耐用性 / 关税"三个维度
+- 把 `source` 拼成"资料来源"行
+- 注意到第三条 `policy_fact_status=non_authoritative_source`,主动提示"具体额度需查官方"
+
+**没有任何"提取 bestsellers 列表"或"提炼 attributes 分布"的动作**——那些字段工具根本没返回。
+
+#### 第七步:用户追问,主 Agent 调 product_search
+
+用户在界面上接着问:
+
+```
+[user] 那 400g 以下的三件套,具体哪个好
+```
+
+主 Agent 判断"具体哪个"需要 SKU,**根据第六段 assistant 消息里的"自重 400g 以下"判断口径**,调 `product_search`:
+
+```
+tool_calls: [{name: "product_search", args: {
+  constraints: {category: "旅行三件套", weight: "<400g"},
+  budget: "<260 元"  ← 来自 travel-gear 价格章节的"180-260 元主力"
+}}]
+```
+
+`product_search` 返回符合约束的具体 SKU 列表。主 Agent 把 SKU 列表 + 品类知识里的"400g 以下算轻便"组合,给用户最终回答。
+
+#### 整条链路一句话收尾
+
+```
+用户提问
+  → 主 Agent 判断调 category_insight
+    → 工具召回 24 个候选 → 按 document_id 去重留 3 个
+      → 工具把 SDK 对象封装成 JSON(无结构化提炼)
+        → 框架塞回主 Agent 对话
+          → 主 Agent 大模型读 content 拼自然语言回答
+            → 用户追问 → 主 Agent 据此调 product_search
+              → 最终回答:品类知识 + 商品事实
 ```
 
 ### 13.5.5 资料不足与服务故障分开处理

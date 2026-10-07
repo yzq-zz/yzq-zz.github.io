@@ -23,6 +23,11 @@ hero:
 
 - [CLI / MCP 的区别与 Bash 基础](/agent/cli-vs-mcp) — 面试题：两种工具调用形态、Token 经济学、能力边界，以及 Bash 解释器原理
 
+### 操作系统
+
+- [进程 vs 线程](/os/process-vs-thread) — 进程与线程的核心区别，以及为什么进程上下文切换比线程重（页表 / TLB / 缓存失效）
+
 ### Agent项目
 
+- [4. 上下文管理策略](/context-management-strategy) — 面试图解：原生 AgentScope 按 token 切会撕开哪些轮次；按轮次保留、工具配对、当前轮不动三道防线
 - [11. 商品搜索工具：生产级检索链路](/agent-project/product-search) — 七层检索漏斗：查询理解、约束分流、BM25 + 向量双路召回与 RRF、粗排精排、实时校验，含 OpenSearch / Milvus 选型与降级设计

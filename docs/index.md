@@ -31,3 +31,4 @@ hero:
 
 - [4. 上下文管理策略](/context-management-strategy) — 面试图解：原生 AgentScope 按 token 切会撕开哪些轮次；按轮次保留、工具配对、当前轮不动三道防线
 - [11. 商品搜索工具：生产级检索链路](/agent-project/product-search) — 七层检索漏斗：查询理解、约束分流、BM25 + 向量双路召回与 RRF、粗排精排、实时校验，含 OpenSearch / Milvus 选型与降级设计
+- [13. CategoryInsight 工具：品类知识 RAG](/agent-project/category-insight) — 在商品搜索之上叠一层品类常识（爆款 / 属性 / 价格区间 / 避坑点），结构化召回给 Agent 当判断依据

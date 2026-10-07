@@ -1,3 +1,17 @@
+/* 首页「笔记分类」区：限制最大高度并内部滚动，避免笔记增多时页面被撑得过长 */
+.VPHome .vp-doc.container {
+  max-height: calc(100vh - var(--vp-nav-height) - 200px);
+  overflow-y: auto;
+  padding-right: 12px;
+}
+.VPHome .vp-doc.container::-webkit-scrollbar {
+  width: 6px;
+}
+.VPHome .vp-doc.container::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 3px;
+}
+
 /* 右侧「本页目录」：问题（h2）常显，子要点（h3）默认折叠，点击箭头展开 */
 
 .VPDocAsideOutline ul.VPDocOutlineItem.root > li.is-collapsible {

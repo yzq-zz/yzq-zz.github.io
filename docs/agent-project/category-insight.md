@@ -1,4 +1,4 @@
-# 13. CategoryInsight 工具：品类知识 RAG 与结构化召回
+# 13. CategoryInsight 工具：品类知识 RAG 召回
 
 ## 13.1 总：品类知识在工具链里的位置
 
@@ -191,159 +191,196 @@ chunk_content  →  embedding_model.encode(text)  →  vector[1024 dim]
 
 ## 13.5 在线召回链路
 
-### 13.5.1 召回阶段详解
+### 13.5.1 为什么不做 BM25 + 向量融合
+
+通用 RAG 里常见"KNN 向量 + BM25 全文"的引擎层加权融合,品类知识场景下不引入这条,三个理由:
+
+- **词项同义替换多**:用户说"轻",文档里写"自重/轻量/轻便"。这类语义同义是 BM25 弱项、向量强项
+- **知识库规模小**:就几篇文档,BM25 的 IDF(逆文档频率)算不出有效区分度,叠加相当于叠两个相同信号
+- **不需要"型号名精确匹配"**:BM25 真正擅长的是 SKU 型号、人名这种"query 里出现就必须命中"的场景,品类知识查询不是这个模式
+
+不引入标准 BM25 融合,在线召回采用"纯向量召回 + 后处理"的链路。
+
+### 13.5.2 召回阶段:四步链路
+
+召回请求 `category_insight_tool(question, top_k=3)` 进来后,链路四步走:
 
 ```
-用户问："旅行装备哪些卖得好"
-        ↓
-embedding 模型把问句转成向量
-        ↓
-向量数据库做相似度搜索
-        ↓
-Hybrid Query（KNN 向量 + BM25 全文）：
-  - KNN 向量召回：语义泛化兜底
-  - BM25 全文匹配：品类词精确匹配
-  - 引擎层加权融合（权重 0.7 / 0.3）
-  - 返回 Top-K 张卡片
-        ↓
-按 card_type 分组：
-  - bestseller 组：多张爆款卡片
-  - attribute 组：多张属性卡片
-  - price_range 组：多张价格卡片
-        ↓
-不需要按 document_id 去重（卡片本身就是完整的）
+① 边界规则检查
+   ↓
+② Qdrant 向量召回:候选数 = min(80, top_k × 8)
+   ↓
+③ 点名文档补查:query 明确点名某文档/政策地域,缺失时在该文档内向量重查
+   ↓
+④ 按 document_id 去重:每篇文档只保留一个 chunk
+   ↓
+返回 top_k 条 insight(每条对应一篇文档的一个 chunk)
 ```
 
-**Top-K 指的是卡片数量，不是 chunk 数量。** 当前 demo 实现里 top_k=80 是 chunk 数量，因为一张文档切成了多个 chunk；生产设计里 top_k 是卡片数量，一张卡片就是一个完整记录。
+**候选数和最终返回数是两个预算**。`top_k=3` 时,先召回 24 个候选向量,去重后剩 3-5 篇文档,每篇留最相关的那个 chunk。
 
-### 13.5.2 一个具体的召回例子
+**Top-K 指的是文档数,不是 chunk 数**。每条 insight 是一篇文档的一个最相关 chunk,因为同一文档的多个 chunk 按 document_id 去重只留一个。
 
-**用户问："旅行装备哪些卖得好"**
+### 13.5.3 一个具体的召回例子
 
-```
-embedding 模型把问句转成向量
-[0.15, -0.28, 0.61, ...]
-        ↓
-向量数据库搜索：
-  问题向量：[0.15, -0.28, 0.61, ...]
-  ↕ 相似度计算
-  爆款卡片向量：[0.12, -0.34, 0.56, ...]  相似度 0.94
-  价格卡片向量：[0.08, -0.19, 0.33, ...]   相似度 0.71
-  其他品类：低相似度被过滤
-        ↓
-返回相似度最高的 Top-K 张卡片
-```
+**场景**:`travel-gear.md` 已经入库,切成 5 个 chunk(对应 `## 品类定位 / ## 当前热卖款型 / ## 关键属性与判断口径 / ## 价格区间参考 / ## 避坑点` 五个章节,每个 chunk 贴了 `【旅行装备品类洞察 / <章节名>】` 前缀)。
 
-### 13.5.3 提炼层详解
-
-拿到卡片后，按组分别提炼：
-
-| 卡片类型 | 提炼方式 | 输入 | 输出 |
-|---|---|---|---|
-| `bestseller` | 按 `\|` 分隔字段 | summary: `"洗漱包\|89\|干湿分离"` | `Bestseller(name, typical_price_cny, why_popular)` |
-| `attribute` | 按 `:` 拆属性名，按 `/` 拆分布，按 `%` 拆比例 | summary: `"材质：尼龙 60% / 帆布 25%"` | `AttributeDist(name, distribution)` |
-| `price_range` | 正则提数字区间，匹配 budget/mid/premium | summary: `"便宜款 60-150 / 中档 150-400"` | `PriceTier(tier, range_cny, notes)` |
-
-实际项目里，提炼步通常调一次小模型做 `summary → 结构化字段` 的转换。规则示意便于看清结构化思路，生产推荐用小模型。
-
-提炼之后，把同组多张卡片合并成一个结构化字段，然后计算整体置信度：
+**用户问**:"旅行三件套自重 400g 以下算什么"
 
 ```
-整体 confidence = 所有卡片 confidence 的平均值
+① 边界规则:不是汇率/明价/具体股票等预设不可回答类 → 继续
+
+② Qdrant 向量召回:
+   query 向量 = embedding("旅行三件套自重 400g 以下算什么")
+   ↕ cosine 相似度
+   Qdrant 里所有 chunk(各品类所有 chunk)按相似度排序
+   取前 min(80, 3 × 8) = 24 个候选
+   
+   假设召回的 24 个候选里:
+     - travel-gear / 关键属性与判断口径  ← 最相关,score 0.78
+     - travel-gear / 当前热卖款型        ← 次相关,score 0.61
+     - travel-gear / 价格区间参考        ← 0.42
+     - travel-gear / 避坑点              ← 0.31
+     - travel-gear / 品类定位            ← 0.28
+     - digital-accessories / ...         ← 0.25 等
+     - 其他品类各种 chunk                ← 0.20 以下
+
+③ 点名文档补查:query 没明确点名某文档 → 跳过
+
+④ 按 document_id 去重:
+   同一篇 travel-gear 的 5 个 chunk 只留最相关那一个
+   最终剩 top_k=3 个 chunk:
+     1. travel-gear / 关键属性与判断口径  ← "三件套全套 400g 上下算轻便"
+     2. travel-gear / 当前热卖款型
+     3. digital-accessories / 某相关 chunk
+
+返回的 insight 结构(每条):
+  {
+    content: "【旅行装备品类洞察 / 关键属性与判断口径】自重:三件套全套 400g 上下算轻便;...",
+    source: "travel-gear.md",
+    score: 0.78,
+    metadata: {
+      source_reference: "...",
+      source_type: "...",
+      published_at: "...",
+      effective_from: "...",
+      effective_to: "...",
+      region: "GLOBAL",
+      version: "...",
+      topic: "category",
+      parent_section: "关键属性与判断口径"
+    },
+    policy_fact_status: "not_policy"
+  }
 ```
+
+### 13.5.4 资料不足与服务故障分开处理
+
+四种情况返回不同的结构:
+
+| 情况 | 返回行为 |
+|---|---|
+| 正常召回,top_k 条都有相关结果 | 返回 `insights` 数组 |
+| 正常召回,所有分数 < 0.20(拒答门槛) | 返回 `insights=[]`,`unanswerable=true`,带原因 |
+| 召回过程异常,本地关键词降级有结果 | 返回 `insights` 数组,带 `retrieval_mode="keyword_fallback"` |
+| 召回异常,降级也无结果或未配置 | 返回明确错误 |
+
+**拒答门槛 0.20**:筛掉明显不相关候选。**达到门槛不等于结果可信**,只是"至少有一条勉强相关"。
+
+**关键词降级**只用于 Embedding/向量服务故障时,逻辑不一样:
+- 不算向量
+- 按 `## ` 标题切段,把 query 的中文 bigram + 英文词项跟段落做词项重合
+- 命中的段落直接当 insight 返回,`score` 是词项重合比例,**不能跟向量相似度直接比较**
+- 降级可能返回同一文档的多个段落
+
+### 13.5.5 原始证据的含义
+
+工具负责检索与封装,**不计算最低价、中位价或属性分布**。Agent 拿到 `content` 后,可以解释资料里的价位参考;要算"当前品类商品统计",必须另外准备同币种、同规格、同时间口径的数据,不能在知识库返回的样本上做推断。
+
+`score` 表示检索相似度,**不代表资料可信度**。可信度由 `metadata.source_type` / `effective_from` / `effective_to` 这些字段决定。
 
 ## 13.6 返回结构与 Agent 拿到的内容
 
-### 13.6.1 CategoryInsightOutput 结构
+### 13.6.1 返回字段
 
-```python
-CategoryInsightOutput(
-    category="旅行三件套",               # 品类名称
-    components=["洗漱包", "鞋包", "数码线收纳"],  # 典型组件
-    bestsellers=[                       # 爆款商品列表
-        Bestseller(name="多功能洗漱包", typical_price_cny=89.0, why_popular="干湿分离"),
-        Bestseller(name="便携鞋包", typical_price_cny=39.0, why_popular="不占箱"),
-        Bestseller(name="数码线收纳包", typical_price_cny=49.0, why_popular="硬壳防压"),
-    ],
-    attributes=[],                     # 属性分布（quick模式为空，deep模式有值）
-    price_tiers=[                      # 价格区间
-        PriceTier(tier="budget", range_cny=(60.0, 150.0), notes="便宜款 60-150"),
-        PriceTier(tier="mid", range_cny=(150.0, 400.0), notes="中档 150-400"),
-        PriceTier(tier="premium", range_cny=(400.0, 1200.0), notes="高端 400+"),
-    ],
-    confidence=0.78                   # 整体置信度
-)
+每条 insight 是一个 JSON 对象,字段:
+
+| 字段 | 含义 |
+|---|---|
+| `content` | chunk 原文(含 `【文档 / 章节】` 前缀) |
+| `source` | 来源文档名(缺失时回退到 document_id) |
+| `score` | 本次检索相似度(辅助参考,不代表资料可信度) |
+| `metadata` | 来源类型、时间、地域、版本、主题、所属章节 |
+| `policy_fact_status` | 政策类资料能否作确定事实的状态(`not_policy` / `not_effective` / `expired` / `fact_eligible` 等) |
+
+工具返回顶层结构(`ToolChunk` 文本块里的 JSON):
+
+```json
+{
+  "insights": [
+    { ... 1 个 insight ... },
+    { ... 1 个 insight ... },
+    ...
+  ]
+}
 ```
 
-### 13.6.2 两档模式对比
+资料不足时:
 
-| 字段 | quick 模式 | deep 模式 |
-|---|---|---|
-| `top_k` | 8 张卡片 | 15 张卡片 |
-| `attributes` | 空 | 有值（属性分布） |
-| `bestsellers` / `price_tiers` | 有值 | 有值 |
-| `confidence` | 有值 | 有值 |
-
-deep 模式多拉 7 张卡片，专门跑一轮属性提炼，把材质、容量等属性分布填进去。
-
-### 13.6.3 Agent 实际拿到的内容
-
-子 Agent 跑完三步管线后，回传给主 Agent 的是一个压缩后的字符串：
-
-```
-旅行三件套品类常识：
-- 典型组件：洗漱包 / 鞋包 / 数码线收纳
-- 爆款 5 件：（洗漱包89元、鞋包39元、收纳包49元...）
-- 价格档位：便宜款 60-150 / 中档 150-400 / 高端 400+
-- 数据置信度 0.78
+```json
+{
+  "insights": [],
+  "unanswerable": true,
+  "reason": "当前知识库没有足够相关且可验证的资料,不能据此作确定性回答"
+}
 ```
 
-主 Agent 拿到这个压缩后的文本，理解后去调 `product_search` 找具体商品。它看不到 5-15 张原始知识切片，上下文清爽得多。
+降级返回时顶层多一个 `retrieval_mode: "keyword_fallback"`。
 
-## 13.7 当前实现 vs 生产设计
+### 13.6.2 Agent 实际拿到的内容
 
-| 维度 | 当前实现 | 生产设计 |
-|---|---|---|
-| 入库内容 | Markdown 切片（碎片段落） | 预提炼的 summary（50-200 字结构化文本） |
-| 入库粒度 | 一个文件切成多个 chunk | 一张卡片 = 一条记录 |
-| 召回结果 | 多个 chunk | 多张卡片 |
-| 去重步骤 | 需要（按 document_id 去重） | 不需要（卡片本身完整） |
-| 提炼层 | 无，直接返回切片原文 | 有，三步管线（召回→提炼→摘要） |
-| 输出内容 | 原始切片 + score + policy_fact_status | 结构化字段（bestsellers/attributes/price_tiers） |
-| 向量引擎 | Qdrant（纯稠密向量） | OpenSearch（KNN + BM25 引擎层融合） |
-| BM25 | 无 | 有（引擎层 hybrid query） |
+主 Agent 拿到 `insights` 数组后,直接读每条 `content` 字段。例如下面的"自重怎么判断"问题,Agent 拿到的就是这种原始证据:
 
-生产设计的核心升级方向有两个：
+```
+[
+  {
+    "content": "【旅行装备品类洞察 / 关键属性与判断口径】自重:三件套全套 400g 上下算轻便;双肩包 400g 以内属超轻;登机箱 3.5kg 以内为轻量档。...",
+    "source": "travel-gear.md",
+    "score": 0.78,
+    "metadata": { "parent_section": "关键属性与判断口径", "topic": "category", ... },
+    "policy_fact_status": "not_policy"
+  },
+  ...
+]
+```
 
-**方向一：结构化卡片升级。** 把 Markdown 切片换成预结构化的 `CategoryCard`，每张卡片在入库前就把原始爬取数据清洗成 `bestsellers[]`、`attributes[]`、`price_tiers[]` 等结构化字段，Agent 拿到的是提炼好的结论而非原始切片。
+Agent 拿到原始 chunk,**不经过"提炼管线"**,直接基于 `content` + `metadata` 解释给用户。比如上面的 `content`,Agent 可以直接复述"旅行三件套全套 400g 上下算轻便"给用户,并附上 `source=travel-gear.md` 让用户知道出处。
 
-**方向二：提炼层升级。** 当前 summary 由规则生成，后续可换成小模型做 `summary → 结构化字段` 的转换，提高字段提取准确率。
+**`not_policy` 只表示这块内容不属于政策类资料,不代表已经被验证为真实市场事实**。如果资料是政策类(`topic=policy`),`policy_fact_status` 会进一步告诉你这块能不能作确定事实。
 
-两个方向是递进关系，不是二选一。
+**没有"结构化字段提炼"**——工具返回的就是原始 chunk 文本 + 元数据,不做 `bestsellers / attributes / price_tiers` 这种结构化字段抽取,也不返回 `CategoryInsightOutput` 之类的复合对象。主 Agent 拿到后自行理解并决定要不要调 `product_search` 找具体商品。
 
-## 13.8 与商品搜索的协作
+## 13.7 与商品搜索的协作
 
 | 精挑时关心 | 来自 category_insight 的哪个字段 |
 |---|---|
-| 套装类商品有没有缺组件 | `components` |
-| 候选属性是否符合品类主流 | `attributes` 的 distribution 排前几位 |
-| 候选价格是否落在合理档位 | `price_tiers` 的 range_cny |
-| 决策置信度 | `confidence`（低于 0.5 时主 loop 应再补 WebSearch） |
+| 商品属于哪个品类、有什么选购要点 | `insights[].content` |
+| 商品的材质/属性判断是否符合品类主流 | `insights[].content` 对应 `## 关键属性与判断口径` 的 chunk |
+| 商品价格是否落在合理区间 | `insights[].content` 对应 `## 价格区间参考` 的 chunk |
+| 资料是不是政策类、能不能作确定事实 | `insights[].policy_fact_status` |
 
 品类知识和商品搜索的分工：
 
-- `category_insight` → 回答"这个品类怎么样"
+- `category_insight` → 回答"这个品类怎么样、有什么选购依据"
 - `product_search` → 回答"哪个具体商品合适"
 
 两者不重叠，品类知识永远不给商品列表，商品搜索永远不解释品类常识。
 
-## 13.9 知识库刷新策略
+## 13.8 知识库刷新策略
 
-| 刷新类型 | 频率 | 数据源 |
+| 文档类型 | 频率 | 数据源 |
 |---|---|---|
-| 爆款卡片 | 每周 | 内部销售榜 + 平台公开榜单 |
-| 属性图谱卡片 | 每月 | 商品库属性聚合 |
-| 价格区间卡片 | 每月 | 历史成交价分位数 |
-| 政策快照卡片 | 按官方公告 | 政府网站抓取 |
+| 品类文档(旅行装备/家居生活/户外运动/数码配件) | 按需更新 | 行业资讯 + 内部选品复盘 |
+| 跨品类通用政策文档(cross-border-guide) | 按官方公告 | 政府网站 / 海关公告 |
 
-刷新流程不在工具运行时，是独立的离线任务。刷新与上线间还需要召回评测（Recall@K / MRR / NDCG）、冷启动 WebSearch 兜底、索引别名切换等工程保障。
+刷新流程不在工具运行时,是独立的离线任务。每次启动会跑 `bootstrap_category_knowledge()`,通过 `content_sha256` 对比识别出有变化的文档,**先删旧版本再插新版本**(SDK 不支持原子换版)。中途失败时允许暂时缺失文档,不能继续引用过期知识。

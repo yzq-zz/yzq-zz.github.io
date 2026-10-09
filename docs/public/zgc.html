@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZGC 回收流程 · 可交互演示（含 good_color 状态机 + Load Barrier 特写）</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #39c5cf;
+    --green: #7ee787;
+    --orange: #ffa657;
+    --red: #ff7b72;
+    --purple: #d2a8ff;
+    --gray: #6e7681;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1140px; margin: 0 auto; padding: 24px 20px 48px; }
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+  header h1 .tag { color: var(--accent); }
+  header .meta { font-size: 12px; color: var(--text-dim); }
+  header .meta .watermark { color: var(--gray); opacity: 0.5; margin-left: 8px; }
+
+  /* ===== good_color 状态机条 ===== */
+  .color-state-bar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+  .color-state-bar .bar-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .color-track {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+  }
+  .color-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+    z-index: 1;
+  }
+  .color-dot {
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 2px solid;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    transition: all 0.3s;
+    background: var(--panel-2);
+  }
+  .color-dot.rm   { border-color: var(--accent); color: var(--accent); }
+  .color-dot.m0   { border-color: var(--orange); color: var(--orange); }
+  .color-dot.m1   { border-color: var(--purple); color: var(--purple); }
+  .color-dot.active {
+    box-shadow: 0 0 14px currentColor;
+    transform: scale(1.25);
+  }
+  .color-name { font-size: 10px; color: var(--text-dim); text-align: center; }
+  .color-node.active .color-name { color: var(--text); font-weight: 600; }
+  .color-arrow {
+    color: var(--text-dim);
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .stw-mark {
+    font-size: 9px;
+    background: rgba(255,123,114,.15);
+    color: var(--red);
+    border: 1px solid rgba(255,123,114,.4);
+    border-radius: 3px;
+    padding: 1px 4px;
+    white-space: nowrap;
+  }
+  .color-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    line-height: 1.5;
+    min-height: 28px;
+  }
+  .color-desc b { color: var(--accent); }
+  .color-desc .pulse { color: var(--orange); }
+
+  .stepper {
+    display: flex; align-items: flex-start; gap: 0;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 12px; margin-bottom: 16px; overflow-x: auto;
+  }
+  .step { flex: 1; min-width: 90px; text-align: center; cursor: pointer; padding: 0 4px; }
+  .step .dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--panel-2); border: 2px solid var(--border);
+    color: var(--text-dim); font-size: 11px; line-height: 18px;
+    margin: 0 auto 6px; transition: all .25s;
+  }
+  .step.active .dot {
+    border-color: var(--accent); background: var(--accent);
+    color: #0d1117; font-weight: 700; box-shadow: 0 0 12px rgba(57,197,207,.5);
+  }
+  .step.done .dot { border-color: var(--green); background: rgba(126,231,135,.15); color: var(--green); }
+  .step .lbl { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+  .step.active .lbl { color: var(--text); }
+  .step .badge { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-top: 3px; }
+  .badge.stw { background: rgba(255,123,114,.15); color: var(--red); border: 1px solid rgba(255,123,114,.4); }
+  .badge.concurrent { background: rgba(126,231,135,.12); color: var(--green); border: 1px solid rgba(126,231,135,.35); }
+  .badge.highlight { background: rgba(255,166,87,.18); color: var(--orange); border: 1px solid rgba(255,166,87,.5); }
+
+  .stage { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+  svg { width: 100%; height: auto; display: block; }
+
+  /* ===== 特写卡片 ===== */
+  .closeup {
+    background: linear-gradient(180deg, rgba(255,166,87,.06), rgba(255,166,87,.02));
+    border: 1.5px solid var(--orange);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+  }
+  .closeup h3 {
+    font-size: 14px; color: var(--orange); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .closeup h3::before {
+    content: "●"; font-size: 10px;
+    animation: blink 1s infinite;
+  }
+  @keyframes blink { 50% { opacity: 0.2; } }
+  .closeup-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr 1fr;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .cu-box {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .cu-box .cu-title {
+    font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 8px;
+  }
+  .cu-box .field {
+    background: rgba(0,0,0,.3);
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin: 4px 0;
+    font-family: inherit;
+  }
+  .cu-box .field.old { color: var(--red); border-left: 3px solid var(--red); }
+  .cu-box .field.new { color: var(--green); border-left: 3px solid var(--green); }
+  .cu-box .field .label { color: var(--text-dim); }
+  .cu-arrow {
+    text-align: center; color: var(--orange); font-size: 20px;
+    align-self: center;
+  }
+  .cu-result {
+    margin-top: 10px; padding: 8px 12px;
+    background: rgba(126,231,135,.1);
+    border-left: 3px solid var(--green);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .cu-result b { color: var(--green); }
+
+  .desc { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  .desc h2 { font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .desc h2 .pill { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  .pill.stw { background: rgba(255,123,114,.15); color: var(--red); }
+  .pill.concurrent { background: rgba(126,231,135,.12); color: var(--green); }
+  .pill.idle { background: rgba(210,168,255,.12); color: var(--purple); }
+  .pill.focus { background: rgba(255,166,87,.18); color: var(--orange); }
+  .desc p { font-size: 13px; line-height: 1.7; color: var(--text); }
+  .desc ul { margin: 8px 0 0 20px; font-size: 12.5px; line-height: 1.8; color: var(--text-dim); }
+  .desc ul li code, .desc p code { color: var(--accent); background: rgba(57,197,207,.08); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+  /* ===== 指针颜色图例 ===== */
+  .pointer-legend {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .pointer-legend .ptr-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ptr-color {
+    width: 10px; height: 10px; border-radius: 2px;
+    display: inline-block;
+    border: 1px solid;
+  }
+  .ptr-color.rm      { background: rgba(57,197,207,.15); border-color: var(--accent); color: var(--accent); }
+  .ptr-color.m0       { background: rgba(255,166,87,.15); border-color: var(--orange); color: var(--orange); }
+  .ptr-color.m1       { background: rgba(210,168,255,.15); border-color: var(--purple); color: var(--purple); }
+  .ptr-color.stale    { background: rgba(255,123,114,.15); border-color: var(--red); color: var(--red); }
+
+  /* ===== 当前 good_color 标签 ===== */
+  .good-color-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid;
+    margin-bottom: 8px;
+  }
+  .good-color-badge.rm { background: rgba(57,197,207,.1); border-color: var(--accent); color: var(--accent); }
+  .good-color-badge.m0 { background: rgba(255,166,87,.1); border-color: var(--orange); color: var(--orange); }
+  .good-color-badge.m1 { background: rgba(210,168,255,.1); border-color: var(--purple); color: var(--purple); }
+
+  .controls { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .controls .nav { display: flex; gap: 10px; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 18px; font-size: 13px;
+    font-family: inherit; cursor: pointer; transition: all .15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover:not(:disabled) { color: #0d1117; filter: brightness(1.1); }
+  .progress-text { font-size: 12px; color: var(--text-dim); }
+
+  /* SVG 元素样式 */
+  .region-rect { fill: rgba(255,255,255,0.02); stroke: var(--border); stroke-width: 1.5; rx: 6; }
+  .region-rect.selected { stroke: var(--orange); stroke-width: 2.5; fill: rgba(255,166,87,.06); }
+  .region-rect.released { stroke: var(--red); stroke-dasharray: 4 3; opacity: 0.45; }
+  .region-rect.new { stroke: var(--green); stroke-width: 2; fill: rgba(126,231,135,.04); }
+  .region-label { font-size: 11px; fill: var(--text-dim); font-family: inherit; }
+  .root-box { fill: rgba(210,168,255,.08); stroke: var(--purple); stroke-width: 1.5; rx: 5; }
+  .obj { stroke-width: 2; }
+  .obj.gray { fill: rgba(110,118,129,.15); stroke: var(--gray); }
+  .obj.marked { fill: rgba(126,231,135,.12); stroke: var(--green); }
+  .obj.highlight { fill: rgba(255,166,87,.25); stroke: var(--orange); }
+  .obj.forwarded { fill: rgba(57,197,207,.08); stroke: var(--accent); stroke-dasharray: 3 2; }
+  .obj-label { font-size: 12px; fill: var(--text); font-family: inherit; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+  .obj-color-tag { font-size: 9px; fill: var(--text-dim); font-family: inherit; text-anchor: middle; }
+  .edge { stroke: var(--gray); stroke-width: 1.5; fill: none; }
+  .edge.live { stroke: var(--green); }
+  .edge.root-edge { stroke: var(--purple); stroke-width: 2; }
+  .edge.edge-new { stroke: var(--accent); stroke-width: 2.5; }
+  .edge.stale { stroke: var(--red); stroke-width: 2.5; stroke-dasharray: 6 3; }
+  .edge.fixed { stroke: var(--green); stroke-width: 2.5; }
+  .zfield-box {
+    fill: rgba(255,166,87,.1); stroke: var(--orange); stroke-width: 1; rx: 3;
+  }
+  .zfield-box.fixed { fill: rgba(126,231,135,.1); stroke: var(--green); }
+  .zfield-text { font-size: 9px; font-family: inherit; }
+  .zfield-text .k { fill: var(--text-dim); }
+  .zfield-text .v-old { fill: var(--red); font-weight: 700; }
+  .zfield-text .v-new { fill: var(--green); font-weight: 700; }
+  .barrier-box {
+    fill: rgba(255,166,87,.08); stroke: var(--orange); stroke-dasharray: 5 3;
+    stroke-width: 1.5; rx: 6; opacity: 0; transition: opacity .3s;
+  }
+  .barrier-box.show { opacity: 1; }
+  .barrier-text { font-size: 11px; fill: var(--orange); font-family: inherit; }
+  .pause-indicator { font-size: 11px; fill: var(--red); font-family: inherit; font-weight: 700; opacity: 0; transition: opacity .2s; }
+  .pause-indicator.show { opacity: 1; }
+  .table-box { fill: rgba(57,197,207,.05); stroke: var(--accent); stroke-width: 1; rx: 6; opacity: 0; transition: opacity .3s; }
+  .table-box.show { opacity: 1; }
+  .table-title { font-size: 11px; fill: var(--accent); font-family: inherit; font-weight: 600; }
+  .table-row { font-size: 11px; fill: var(--text); font-family: inherit; }
+  .threads { display: flex; gap: 6px; }
+  .thread { width: 10px; height: 10px; border-radius: 2px; background: var(--green); transition: background .2s; }
+  .thread.stopped { background: var(--red); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+
+  /* ===== 底部静态知识区 ===== */
+  .knowledge {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-top: 24px;
+  }
+  .knowledge h2 {
+    font-size: 14px;
+    color: var(--accent);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .knowledge h2::before { content: "📚"; font-size: 14px; }
+  .knowledge-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .k-block {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .k-block h3 {
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .k-block p, .k-block li {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+  .k-block ul { margin: 6px 0 0 16px; }
+  .k-block li { margin: 2px 0; }
+  .k-block code {
+    color: var(--accent);
+    background: rgba(57,197,207,.08);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .slow-path-box {
+    background: rgba(0,0,0,.25);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    line-height: 1.8;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+  .slow-path-box .kw  { color: var(--accent); }
+  .slow-path-box .m0  { color: var(--orange); }
+  .slow-path-box .rm  { color: var(--accent); }
+  .slow-path-box .red { color: var(--red); }
+  .slow-path-box .grn { color: var(--green); }
+  .slow-path-box .bld { color: var(--text); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="tag">ZGC</span> · 并发回收 + good_color 状态机</h1>
+    <div class="meta">经典单代 ZGC · 3 个 STW · 核心：good_color 全局切换 + 堆内指针惰性修复<span class="watermark"> · by yzq</span></div>
+  </header>
+
+  <!-- ===== good_color 状态机 ===== -->
+  <div class="color-state-bar">
+    <div class="bar-label">全局 good_color 状态机</div>
+    <div class="color-track" id="colorTrack">
+      <!-- JS 渲染 -->
+    </div>
+    <div class="color-desc" id="colorDesc"></div>
+  </div>
+
+  <!-- ===== 指针颜色图例 ===== -->
+  <div class="pointer-legend" id="pointerLegend">
+    <div class="ptr-item"><span class="ptr-color rm"></span><code>Remapped</code> = 已对齐当前视图（地址有效）</div>
+    <div class="ptr-item"><span class="ptr-color m0"></span><code>M0</code> = 本轮标记色 / 旧标记残留</div>
+    <div class="ptr-item"><span class="ptr-color m1"></span><code>M1</code> = 交替轮次标记色</div>
+    <div class="ptr-item"><span class="ptr-color stale"></span><span style="color:var(--red)">红色虚线</span> = 指针颜色 ≠ good_color，barrier 会拦截</div>
+  </div>
+
+  <div class="stepper" id="stepper"></div>
+
+  <div class="stage">
+    <div id="gcStateBar" style="margin-bottom:8px;"></div>
+    <svg viewBox="0 0 1080 470" id="canvas"></svg>
+    <div class="legend">
+      <span><i style="border-color:var(--purple)"></i>root 引用</span>
+      <span><i style="border-color:var(--green)"></i>活引用（颜色=good_color）</span>
+      <span><i style="border-color:var(--red);border-top-style:dashed"></i>指针颜色≠good_color（待修复）</span>
+      <span><i style="border-color:var(--accent)"></i>新地址引用</span>
+    </div>
+  </div>
+
+  <!-- Load Barrier 特写卡片 -->
+  <div class="closeup" id="closeup" style="display:none">
+    <h3>特写：Load Barrier slow_path —— 不管对象搬没搬，颜色都要变 Remapped</h3>
+    <div class="closeup-grid">
+      <div class="cu-box">
+        <div class="cu-title">① Z.ref 字段（修复前）</div>
+        <div class="field"><span class="label">z.ref:</span> A@R1 <span style="color:var(--orange)">[M0]</span></div>
+        <div style="color:var(--text-dim);margin-top:6px;font-size:11px">
+          Z 在 R2，它的 ref 指向 A 的旧地址 R1。<br>
+          当前 good_color = <b style="color:var(--accent)">Remapped</b><br>
+          颜色 M0 ≠ Remapped → <b style="color:var(--red)">barrier 拦截</b>
+        </div>
+      </div>
+      <div class="cu-box">
+        <div class="cu-title">② slow_path 逻辑</div>
+        <div style="font-family:monospace;font-size:11px;line-height:1.9">
+          <span style="color:var(--accent)">slow_path</span>(ptr)<br>
+          &nbsp;&nbsp;old = ptr <b>去色</b> → <span style="color:var(--orange)">R1</span><br>
+          &nbsp;&nbsp;查 forwarding table:<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--green)">R1 → R6</span> ✓ 找到<br>
+          &nbsp;&nbsp;新指针 = <span style="color:var(--green)">R6</span> | <span style="color:var(--accent)">Remapped</span><br>
+          &nbsp;&nbsp;CAS 写回字段 ✓
+        </div>
+      </div>
+      <div class="cu-box">
+        <div class="cu-title">③ 修复后</div>
+        <div class="field new"><span class="label">z.ref:</span> A@R6 <span style="color:var(--accent)">[Remapped]</span></div>
+        <div style="color:var(--text-dim);margin-top:6px;font-size:11px">
+          关键：对象 <b>被搬走</b>时，地址也改。<br>
+          对象 <b>没被搬</b>时，只改颜色。<br>
+          <b>共同结果：</b>颜色都变成 Remapped。
+        </div>
+      </div>
+    </div>
+    <div class="cu-result">
+      <b>结果：</b>调用方拿到 A@R6 [Remapped]，正常访问。下次再读 z.ref → M0 ≠ Remapped？再修一次。下次 barrier 命中时直接放行。
+    </div>
+  </div>
+
+  <div class="desc" id="desc"></div>
+
+  <div class="controls">
+    <div class="threads" id="threads" title="应用线程状态"></div>
+    <div class="progress-text" id="progressText"></div>
+    <div class="nav">
+      <button id="btnReset">重置</button>
+      <button id="btnPrev">上一步</button>
+      <button id="btnNext" class="primary">下一步 →</button>
+    </div>
+  </div>
+
+  <!-- ===== 底部静态知识区 ===== -->
+  <div class="knowledge">
+    <h2>ZGC 核心概念（始终可见）</h2>
+    <div class="knowledge-grid">
+      <div class="k-block">
+        <h3>染色指针（Colored Pointers）</h3>
+        <p>64 位指针的低几位存 GC 元数据（颜色位）。x86-64 实际只用 48 位寻址，ZGC 借走高几位存状态。</p>
+        <ul>
+          <li><code>M0</code> / <code>M1</code>：标记色，交替使用区分轮次</li>
+          <li><code>Remapped</code>：指针已对齐当前视图，地址有效</li>
+          <li>好处：barrier 只看指针一眼就知道要不要处理，不查对象头</li>
+        </ul>
+      </div>
+      <div class="k-block">
+        <h3>good_color 全局切换</h3>
+        <p>good_color 是<strong>全局单一变量</strong>，每次 STW 切换。所有指针瞬间"wrong"，但指针本身不动。</p>
+        <ul>
+          <li>切换 = O(1) 写，<strong>不动堆里任何指针</strong></li>
+          <li>旋转：<code>M0 → Rm → M1 → Rm → ...</code></li>
+          <li>错误颜色靠 barrier 逐槽修正，GC 并发做</li>
+        </ul>
+      </div>
+      <div class="k-block">
+        <h3>Load Barrier 工作方式</h3>
+        <div class="slow-path-box">
+          <span class="kw">ref</span> = *fieldAddr<br>
+          <span class="kw">if</span> (colorBits(ref) <span class="bld">≠</span> good_color) {<br>
+          &nbsp;&nbsp;<span class="kw">ref</span> = <span class="kw">slow_path</span>(fieldAddr, ref);<br>
+          }<br>
+          <span class="kw">use</span>(ref); <span style="opacity:.5">// fast path 直接用</span>
+        </div>
+        <p style="margin-top:8px">fast path 只比较颜色位（寄存器操作，几纳秒）。slow path 走并发路径。</p>
+      </div>
+      <div class="k-block">
+        <h3>slow_path 两件事</h3>
+        <div class="slow-path-box">
+          <span class="kw">old_addr</span> = ref <span class="kw">去色</span><br>
+          <span class="kw">if</span> forwarding[old_addr] 找到 { <span class="grn">搬了</span> → addr=新地址 }<br>
+          <span class="kw">else</span>                      { <span class="m0">没搬</span> → addr=原地址 }<br>
+          <span class="kw">return</span> addr | <span class="rm">当前 good_color</span>
+        </div>
+        <p style="margin-top:8px">区别：搬走的改地址+颜色，没搬的只改颜色。<strong>共同结果：颜色都变成 good_color。</strong></p>
+      </div>
+      <div class="k-block" style="grid-column:1/-1;">
+        <h3>SATB 写屏障（Snapshot-At-The-Beginning）</h3>
+        <p>并发标记开始时照一张快照。之后应用线程写屏障记录"曾经指向谁"，保证标记不漏。</p>
+        <ul style="column-count:2;column-gap:20px;">
+          <li><code>z.ref = null</code> → 写屏障记录"A.ref 曾指向 null"（快照保证 B 仍被标记）</li>
+          <li>并发标记结束后 STW 排空缓冲</li>
+          <li>代价：可能多活几个垃圾（下轮回收）</li>
+          <li>好处：不需要反复扫描保证正确性</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+ * good_color 状态机
+ * ============================================================ */
+const COLOR_STATES = [
+  { id: 'idle',    name: '稳态',   short: 'Rm', cls: 'rm',  color: 'var(--accent)' },
+  { id: 'stw1',   name: 'STW1',   short: 'M0', cls: 'm0',  color: 'var(--orange)' },
+  { id: 'cmark',  name: '并发标记', short: 'M0', cls: 'm0',  color: 'var(--orange)' },
+  { id: 'stw2',   name: 'STW2',   short: 'M0', cls: 'm0',  color: 'var(--orange)' },
+  { id: 'stw3',   name: 'STW3',   short: 'Rm', cls: 'rm',  color: 'var(--accent)' },
+  { id: 'creloc', name: '并发转移', short: 'Rm', cls: 'rm',  color: 'var(--accent)' },
+  { id: 'hit',    name: '命中',    short: 'Rm', cls: 'rm',  color: 'var(--accent)' },
+  { id: 'done',   name: '完成',   short: 'Rm', cls: 'rm',  color: 'var(--accent)' },
+];
+
+// 每个阶段的 good_color 状态
+const stageColorState = {
+  0: 'idle',   // 稳态 Remapped
+  1: 'stw1',   // STW1 切 M0
+  2: 'cmark',  // 并发标记 M0
+  3: 'stw2',   // STW2 仍是 M0
+  4: 'stw3',   // STW3 切 Remapped
+  5: 'creloc', // 并发转移 Remapped
+  6: 'hit',    // Barrier命中 Remapped
+  7: 'done',   // 完成 Remapped
+};
+
+// 每个阶段的颜色描述
+const colorDescMap = {
+  0: '周期开始前，good_color = <b>Remapped</b>。所有指针颜色 = Remapped，barrier 直接放行。',
+  1: '<span class="stw-mark">STW1</span> good_color 从 <b>Remapped</b> 切成 <b>M0</b>。<b>所有指针瞬间变成 wrong！</b>下次读任何一个指针，barrier 都会拦。',
+  2: '并发标记阶段，good_color = <b>M0</b>。mark 线程把遍历到的指针设成 M0；应用线程读指针时若颜色 ≠ M0，barrier 把它标记为 M0。',
+  3: '<span class="stw-mark">STW2</span> good_color 不变，仍是 <b>M0</b>。排空 SATB、选 Relocation Set。',
+  4: '<span class="stw-mark">STW3</span> good_color 从 <b>M0</b> 切成 <b>Remapped</b>。<b>所有指针再次瞬间 wrong！</b>对象已搬的地址变了，没搬的地址不变，但颜色都要靠 barrier 逐槽修正。',
+  5: '并发转移阶段，good_color = <b>Remapped</b>。堆里所有指针颜色若 ≠ Remapped，barrier 逐槽修正。没被读过的指针暂时还是 M0，等到被读时才修。',
+  6: '应用线程读 <code>z.ref</code>，颜色 M0 ≠ Remapped，barrier slow_path → 地址改新址+颜色改 Remapped。下次再读直接放行。',
+  7: '周期结束，good_color = <b>Remapped</b>。所有被读过的指针已是 Remapped；没读过的等下次被读时再修（不急）。',
+};
+
+/* ============================================================
+ * 阶段定义
+ * ============================================================ */
+const stages = [
+  {
+    key: 'idle', name: 'Idle', short: '初始', type: 'idle', threads: 'running',
+    gcBadge: 'gcBadge rm',
+    gcBadgeText: 'good_color = Remapped',
+    gcStateLine: '稳态：所有指针 Remapped，barrier 休眠',
+    title: '堆布局：Region + 染色指针 + good_color = Remapped',
+    pill: '稳态',
+    desc: 'ZGC 把堆切成若干 <code>Region</code>，指针低 4 位携带颜色（<code>M0 / M1 / Remapped</code>）。<b>当前 good_color = Remapped</b>，所有指针与之对齐，barrier 休眠。本例重点观察对象 <b>Z</b>：住在 R2，字段 <code>z.ref</code> 指向 A。',
+    points: [
+      'R1:A, R2:B/Z, R3:D, R4:E, R5:F/C/G；R6/R7 空闲',
+      'GC Roots 直接引用 A、D；引用链 root→A、root→D、A→B、B→C、D→E、D→Z、Z→A',
+      '所有指针颜色 = <b>Remapped</b>（= good_color）→ barrier 直接放行',
+      'F、G 不可达（垃圾）；C 在 R5 但可达'
+    ],
+    movedObjects: [], zRefFixed: false,
+    relocationSet: [], released: [],
+    showBarrier: false, showPause: false
+  },
+  {
+    key: 'mark-start', name: 'Pause Mark Start', short: '初始标记', type: 'stw', threads: 'stopped',
+    gcBadge: 'gcBadge m0',
+    gcBadgeText: 'good_color = M0 (切换!)',
+    gcStateLine: 'STW1 切换 good_color: Remapped → M0',
+    title: 'STW #1 · 初始标记（good_color 切换：Remapped → M0）',
+    pill: 'STW',
+    desc: '短暂暂停所有线程。<b>good_color 从 Remapped 切换为 M0。</b>这是全局操作：写一个变量，所有指针瞬间"wrong"。从 GC Roots 出发把直接可达对象标记为 M0。',
+    points: [
+      '<b style="color:var(--accent)">good_color 切换：Remapped → M0</b>（写一个变量，全堆指针瞬间 wrong）',
+      'root 直接引用的 A、D 被标记为 M0',
+      'Z→A 这条边此时不被标记（标记从根出发，Z 不是根）',
+      '应用线程恢复后，任何读指针操作若颜色 ≠ M0，barrier 会把它设成 M0'
+    ],
+    markedRoots: ['A', 'D'], movedObjects: [], zRefFixed: false,
+    relocationSet: [], released: [],
+    showBarrier: true, showPause: true
+  },
+  {
+    key: 'concurrent-mark', name: 'Concurrent Mark', short: '并发标记', type: 'concurrent', threads: 'running',
+    gcBadge: 'gcBadge m0',
+    gcBadgeText: 'good_color = M0',
+    gcStateLine: '并发标记：barrier 把读到的指针都设成 M0',
+    title: '并发标记（good_color = M0）',
+    pill: '并发',
+    desc: '应用线程恢复。<b>good_color = M0。</b>GC 线程并发遍历对象图，把 B、C、E、Z 都标记为存活。SATB 写屏障保证快照一致性。',
+    points: [
+      '标记沿引用扩散：A→B→C，D→E，D→Z（Z 通过 D 可达）',
+      '标记过程中被读到的指针颜色被设成 M0',
+      'F、G 仍灰色（不可达）',
+      '此时 Z→A 指针颜色 = M0（= good_color，barrier 放行，但这是因为 good_color 是 M0，不是因为 A 不会搬）'
+    ],
+    markedAll: true, movedObjects: [], zRefFixed: false,
+    relocationSet: [], released: [],
+    showBarrier: true, showPause: false
+  },
+  {
+    key: 'mark-end', name: 'Pause Mark End', short: '再标记', type: 'stw', threads: 'stopped',
+    gcBadge: 'gcBadge m0',
+    gcBadgeText: 'good_color = M0（不变）',
+    gcStateLine: 'STW2：good_color 仍是 M0，排空 SATB、选 Relocation Set',
+    title: 'STW #2 · 再标记（good_color 不变，仍是 M0）',
+    pill: 'STW',
+    desc: '排空 SATB、处理 Soft/Weak 引用、类卸载。<b>good_color 保持 M0。</b>统计每个 Region 存活字节数，选回收收益最高的 Region 进入 Relocation Set。本例选 R1（只住了 A）和 R5（垃圾多）。',
+    points: [
+      'R1、R5 高亮：进入 Relocation Set',
+      'R1 里的 A、R5 里的存活对象 C 将被搬走；F/G 随 R5 释放',
+      '<b>good_color 保持 M0</b>',
+      '注意：root→A 是根引用，下个 STW 会立即更新；但 <b>Z→A 这条堆内引用此时颜色=M0（= good_color），barrier 不会拦它——但 A 马上要搬！</b>'
+    ],
+    markedAll: true, movedObjects: [], zRefFixed: false,
+    relocationSet: ['R1', 'R5'], released: [],
+    showBarrier: true, showPause: true
+  },
+  {
+    key: 'relocate-start', name: 'Pause Relocate Start', short: '初始转移', type: 'stw', threads: 'stopped',
+    gcBadge: 'gcBadge rm',
+    gcBadgeText: 'good_color = Remapped (切换!)',
+    gcStateLine: 'STW3 切换 good_color: M0 → Remapped',
+    title: 'STW #3 · 初始转移（good_color 切换：M0 → Remapped）',
+    pill: 'STW',
+    desc: '<b>good_color 从 M0 切换为 Remapped。</b>把 GC Roots 直接引用、且在 Relocation Set 里的对象复制到新 Region，立即更新根指针。',
+    points: [
+      'A 从 R1 搬到 R6；root→A 立即被改成 R6 + Remapped',
+      '转发表登记 A@R1 → A@R6',
+      '<b style="color:var(--accent)">good_color 切换：M0 → Remapped（又一次全堆"wrong"）</b>',
+      '<b style="color:var(--red)">关键：Z→A 颜色还是 M0，≠ Remapped！</b>Z 在 R2，它的 ref 字段还指向 R1（barrier 不会主动来修它）',
+      'D→E、D→Z、root→D、B→C 等指针颜色也都是 M0，≠ Remapped，等着被 barrier 逐槽修正'
+    ],
+    markedAll: true, movedObjects: ['A'], zRefFixed: false,
+    relocationSet: ['R5'], released: ['R1'],
+    showBarrier: true, showPause: true
+  },
+  {
+    key: 'concurrent-relocate', name: 'Concurrent Relocate', short: '并发转移', type: 'concurrent', threads: 'running',
+    gcBadge: 'gcBadge rm',
+    gcBadgeText: 'good_color = Remapped',
+    gcStateLine: '并发转移：barrier 修正读到的旧颜色指针',
+    title: '并发转移（good_color = Remapped，堆内指针待修正）',
+    pill: '并发',
+    desc: '应用线程恢复。<b>good_color = Remapped。</b>GC 线程并发把 R5 里存活的 C 搬到 R7，转发表新增 C@R5→C@R7。堆内旧颜色指针（M0）被 barrier 逐槽修正。',
+    points: [
+      'C 从 R5 搬到 R7；F、G 随 R5 一起被释放',
+      '<b style="color:var(--orange)">good_color = Remapped，所有 M0 指针都 wrong</b>',
+      'Z→A 还是 M0 颜色 → 连在 R1 虚线轮廓上（Z.ref 字段里存的是 R1+A的地址，颜色=M0）',
+      '只要没有线程去读 z.ref，Z→A 就一直是 M0 颜色的旧指针',
+      '<b>这就是惰性修复：谁读谁修，不读不修</b>'
+    ],
+    markedAll: true, movedObjects: ['A', 'C'], zRefFixed: false,
+    relocationSet: [], released: ['R1', 'R5'],
+    showBarrier: true, showPause: false
+  },
+  {
+    key: 'barrier-hit', name: 'Load Barrier 命中', short: 'Barrier命中', type: 'highlight', threads: 'running',
+    gcBadge: 'gcBadge rm',
+    gcBadgeText: 'good_color = Remapped',
+    gcStateLine: 'Z.ref 颜色 M0 ≠ Remapped → barrier slow_path 修正',
+    title: 'Load Barrier 命中（slow_path：地址变新址 + 颜色变 Remapped）',
+    pill: '重点',
+    desc: '某线程执行 <code>z.ref.xxx()</code>。<b>z.ref 颜色 = M0，good_color = Remapped</b>，barrier 慢路径：查转发表拿到新地址，覆写 Z.ref 字段为 <code>新地址|Remapped</code>。',
+    points: [
+      'ZGC 从来没有"找到 Z 然后修 Z"这个动作',
+      '是 Z 自己这次读访问，在 barrier 里把自己字段改了',
+      'slow_path 结果：A 搬了 → 地址变 R6 + 颜色变 Remapped',
+      '<b style="color:var(--green)">其他指针如 D→E 也一样被逐槽修正：对象没搬，只改颜色</b>',
+      '（因为 good_color 切成了 Remapped，所有 M0 指针都是 wrong，必须逐槽修成 Remapped）',
+      '下次再读 z.ref → 颜色=Remapped，barrier 直接放行'
+    ],
+    markedAll: true, movedObjects: ['A', 'C'], zRefFixed: true,
+    relocationSet: [], released: ['R1', 'R5'],
+    showBarrier: true, showPause: false
+  },
+  {
+    key: 'done', name: 'Cycle End', short: '回收完成', type: 'idle', threads: 'running',
+    gcBadge: 'gcBadge rm',
+    gcBadgeText: 'good_color = Remapped',
+    gcStateLine: '周期结束：good_color = Remapped，barrier 休眠',
+    title: '回收完成 · good_color = Remapped（所有被读的指针已对齐）',
+    pill: '稳态',
+    desc: 'Relocation Set 清空，R1、R5 归还。<b>good_color = Remapped。</b>所有被应用线程读过的指针颜色已修复为 Remapped；没被读过的（如某些角落的指针）颜色可能仍是 M0，等下次被读时再修（不急）。',
+    points: [
+      'A 在 R6，C 在 R7；B、D、E 原地',
+      'Z.ref 颜色 = Remapped，指向 R6 的 A',
+      'D→E、D→Z 等指针颜色 = Remapped（被应用线程读过了）',
+      'R1/R5 已释放',
+      '停顿时间与堆大小、活对象大小基本无关'
+    ],
+    markedAll: true, movedObjects: ['A', 'C'], zRefFixed: true,
+    relocationSet: [], released: ['R1', 'R5'],
+    showBarrier: false, showPause: false
+  }
+];
+
+/* ============================================================
+ * 堆模型
+ * ============================================================ */
+const regions = [
+  { id: 'R1', x: 30,  y: 110, w: 115, h: 250 },
+  { id: 'R2', x: 160, y: 110, w: 115, h: 250 },
+  { id: 'R3', x: 290, y: 110, w: 115, h: 250 },
+  { id: 'R4', x: 420, y: 110, w: 115, h: 250 },
+  { id: 'R5', x: 550, y: 110, w: 115, h: 250 },
+  { id: 'R6', x: 680, y: 110, w: 115, h: 250 },
+  { id: 'R7', x: 810, y: 110, w: 115, h: 250 },
+];
+
+const objects = [
+  { id: 'A', region: 'R1', cx: 87,  cy: 235 },
+  { id: 'B', region: 'R2', cx: 235, cy: 245 },
+  { id: 'Z', region: 'R2', cx: 195, cy: 155 },
+  { id: 'D', region: 'R3', cx: 347, cy: 235 },
+  { id: 'E', region: 'R4', cx: 477, cy: 235 },
+  { id: 'F', region: 'R5', cx: 607, cy: 170 },
+  { id: 'C', region: 'R5', cx: 607, cy: 250 },
+  { id: 'G', region: 'R5', cx: 607, cy: 330 },
+];
+
+const movedPositions = {
+  'A': { region: 'R6', cx: 737, cy: 235 },
+  'C': { region: 'R7', cx: 867, cy: 235 },
+};
+
+const edges = [
+  { from: 'root', to: 'A' },
+  { from: 'root', to: 'D' },
+  { from: 'A', to: 'B' },
+  { from: 'B', to: 'C' },
+  { from: 'D', to: 'E' },
+  { from: 'D', to: 'Z' },
+];
+
+let cur = 0;
+const $ = (id) => document.getElementById(id);
+
+/* ============================================================
+ * 渲染 good_color 状态机条
+ * ============================================================ */
+function renderColorStateBar() {
+  const track = $('colorTrack');
+  const states = [
+    { label: '稳态', short: 'Rm', cls: 'rm', color: 'var(--accent)', stw: false },
+    { label: 'STW1', short: 'M0', cls: 'm0', color: 'var(--orange)', stw: true },
+    { label: '并发标记', short: 'M0', cls: 'm0', color: 'var(--orange)', stw: false },
+    { label: 'STW2', short: 'M0', cls: 'm0', color: 'var(--orange)', stw: true },
+    { label: 'STW3', short: 'Rm', cls: 'rm', color: 'var(--accent)', stw: true },
+    { label: '并发转移', short: 'Rm', cls: 'rm', color: 'var(--accent)', stw: false },
+    { label: '命中', short: 'Rm', cls: 'rm', color: 'var(--accent)', stw: false },
+    { label: '完成', short: 'Rm', cls: 'rm', color: 'var(--accent)', stw: false },
+  ];
+
+  let html = '';
+  states.forEach((s, i) => {
+    if (i > 0) {
+      html += `<span class="color-arrow">→</span>`;
+    }
+    const isActive = (i === cur);
+    html += `
+      <div class="color-node ${isActive ? 'active' : ''}">
+        <div class="color-dot ${s.cls} ${isActive ? 'active' : ''}" style="${isActive ? ('border-color:'+s.color+';color:'+s.color) : ''}">${s.short}</div>
+        <div class="color-name">${s.label}${s.stw ? '<br><span class="stw-mark">STW</span>' : ''}</div>
+      </div>
+    `;
+  });
+  track.innerHTML = html;
+
+  // 描述
+  const desc = $('colorDesc');
+  desc.innerHTML = colorDescMap[cur] || '';
+}
+
+/* ============================================================
+ * 工具
+ * ============================================================ */
+function getObjPos(id, s) {
+  if (s.movedObjects && s.movedObjects.includes(id)) {
+    return movedPositions[id];
+  }
+  return objects.find(o => o.id === id);
+}
+
+function liveObjectSet(s) {
+  const set = new Set();
+  if (s.key === 'idle' || s.key === 'done') {
+    ['A','B','C','D','E','Z'].forEach(x => set.add(x));
+  } else if (s.markedRoots) {
+    s.markedRoots.forEach(x => set.add(x));
+  } else if (s.markedAll || s.relocationSet || s.movedObjects.length > 0 || s.key === 'relocate-start') {
+    ['A','B','C','D','E','Z'].forEach(x => set.add(x));
+  }
+  return set;
+}
+
+function colorTag(objId, s) {
+  if (s.key === 'idle') return '—';
+  if (s.movedObjects && s.movedObjects.includes(objId)) return 'Remapped';
+  if (s.key === 'done') return 'Remapped';
+  return 'M0';
+}
+
+// 当前阶段的 good_color
+function currentGoodColor(stageIdx) {
+  // 0=idle=Rm, 1=stw1=M0, 2=cmark=M0, 3=stw2=M0, 4=stw3=Rm, 5=creloc=Rm, 6=hit=Rm, 7=done=Rm
+  if (stageIdx === 0) return 'Remapped';
+  if (stageIdx >= 1 && stageIdx <= 3) return 'M0';
+  return 'Remapped';
+}
+
+/* ============================================================
+ * 渲染
+ * ============================================================ */
+function renderStepper() {
+  const el = $('stepper');
+  el.innerHTML = '';
+  stages.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'step' + (i === cur ? ' active' : '') + (i < cur ? ' done' : '');
+    const badgeCls = s.type === 'stw' ? 'stw' : s.type === 'concurrent' ? 'concurrent' : s.type === 'highlight' ? 'highlight' : 'idle';
+    const badgeTxt = s.type === 'stw' ? 'STW' : s.type === 'concurrent' ? '并发' : s.type === 'highlight' ? '重点' : '稳态';
+    div.innerHTML = `
+      <div class="dot">${i < cur ? '✓' : (i + 1)}</div>
+      <div class="lbl">${s.short}</div>
+      <div><span class="badge ${badgeCls}">${badgeTxt}</span></div>
+    `;
+    div.onclick = () => { cur = i; render(); };
+    el.appendChild(div);
+  });
+}
+
+function edgePoint(from, to, offset) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  return { x: from.x + dx/len*offset, y: from.y + dy/len*offset };
+}
+
+function arrowColor(cls) {
+  if (cls.includes('stale')) return '#ff7b72';
+  if (cls.includes('edge-new')) return '#39c5cf';
+  if (cls.includes('root-edge')) return '#d2a8ff';
+  if (cls.includes('fixed') || cls.includes('live')) return '#7ee787';
+  return '#6e7681';
+}
+
+function arrowHead(x1, y1, x2, y2, color, size) {
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const spread = Math.PI / 8;
+  const back = angle + Math.PI;
+  const p1x = x2 + size * Math.cos(back + spread);
+  const p1y = y2 + size * Math.sin(back + spread);
+  const p2x = x2 + size * Math.cos(back - spread);
+  const p2y = y2 + size * Math.sin(back - spread);
+  return `<polygon points="${x2},${y2} ${p1x},${p1y} ${p2x},${p2y}" fill="${color}"/>`;
+}
+
+function renderGCStateBar() {
+  const s = stages[cur];
+  const gc = $('gcStateBar');
+  gc.innerHTML = `
+    <div class="good-color-badge ${s.gcBadge.split(' ')[1]}">
+      <span>全局 good_color：</span>
+      <strong>${s.gcBadgeText}</strong>
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${s.gcStateLine}</div>
+  `;
+}
+
+function renderSVG() {
+  const s = stages[cur];
+  const gc = currentGoodColor(cur);
+  const svg = $('canvas');
+  let html = '';
+
+  html += `<defs>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0  L 10  L 5  z" fill="#6e7681"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0  L 10  L 5  z" fill="#7ee787"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0  L 10  L 5  z" fill="#d2a8ff"/>
+    </marker>
+    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0  L 10  L 5  z" fill="#39c5cf"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0  L 10  L 5  z" fill="#ff7b72"/>
+    </marker>
+  </defs>`;
+
+  // 应用线程状态
+  html += `<text x="30" y="30" class="region-label">应用线程：</text>`;
+  for (let i = 0; i < 4; i++) {
+    const stopped = s.threads === 'stopped';
+    html += `<rect x="${110 + i*22}" y="20" width="12" height="12" rx="2" class="thread ${stopped ? 'stopped' : ''}"/>`;
+  }
+  if (s.showPause) {
+    html += `<text x="220" y="30" class="pause-indicator show">■ STW 安全点 · 所有线程暂停</text>`;
+  }
+
+  // GC Roots
+  html += `<rect x="30" y="50" width="1020" height="38" class="root-box"/>`;
+  html += `<text x="50" y="74" class="region-label" style="fill:var(--purple)">GC Roots (栈 / 全局 / JNI)</text>`;
+
+  // Region
+  regions.forEach(r => {
+    let cls = 'region-rect';
+    if (s.released && s.released.includes(r.id)) cls += ' released';
+    else if (s.relocationSet && s.relocationSet.includes(r.id)) cls += ' selected';
+    if ((r.id === 'R6' || r.id === 'R7')) {
+      const used = (s.movedObjects || []).some(id => movedPositions[id].region === r.id);
+      if (used) cls += ' new';
+    }
+    html += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" class="${cls}"/>`;
+    html += `<text x="${r.x + r.w/2}" y="${r.y + 18}" class="region-label" text-anchor="middle">${r.id}</text>`;
+    if ((r.id === 'R6' || r.id === 'R7') && !(s.movedObjects || []).some(id => movedPositions[id].region === r.id)) {
+      html += `<text x="${r.x + r.w/2}" y="${r.y + r.h/2 + 30}" class="region-label" text-anchor="middle" style="opacity:.5">空闲</text>`;
+    }
+  });
+
+  // 普通边
+  edges.forEach(e => {
+    let fromPos, toObj, toPos, cls = 'edge';
+    if (e.from === 'root') {
+      if (e.to === 'A' && s.movedObjects && s.movedObjects.includes('A')) {
+        toObj = movedPositions['A'];
+        cls += ' root-edge edge-new';
+      } else {
+        toObj = getObjPos(e.to, s);
+        cls += ' root-edge';
+      }
+      fromPos = { x: toObj.cx, y: 88 };
+      toPos = { x: toObj.cx, y: toObj.cy - 20 };
+    } else {
+      const fromObj = getObjPos(e.from, s);
+      toObj = getObjPos(e.to, s);
+      const fromCenter = { x: fromObj.cx, y: fromObj.cy };
+      const toCenter = { x: toObj.cx, y: toObj.cy };
+      cls += ' live';
+      if (s.movedObjects && s.movedObjects.includes(e.to)) cls += ' edge-new';
+
+      if (e.from === 'B' && e.to === 'C') {
+        const start = edgePoint(fromCenter, { x: (fromCenter.x + toCenter.x) / 2, y: 318 }, 18);
+        const end = edgePoint(toCenter, { x: (fromCenter.x + toCenter.x) / 2, y: 318 }, 18);
+        const cp = { x: (start.x + end.x) / 2, y: 318 };
+        html += `<path d="M ${start.x} ${start.y} Q ${cp.x} ${cp.y} ${end.x} ${end.y}" class="${cls}"/>`;
+        html += arrowHead(cp.x, cp.y, end.x, end.y, arrowColor(cls), 9);
+        return;
+      }
+
+      fromPos = edgePoint(fromCenter, toCenter, 18);
+      toPos = edgePoint(toCenter, fromCenter, 18);
+    }
+    html += `<line x1="${fromPos.x}" y1="${fromPos.y}" x2="${toPos.x}" y2="${toPos.y}" class="${cls}"/>`;
+    html += arrowHead(fromPos.x, fromPos.y, toPos.x, toPos.y, arrowColor(cls), 9);
+  });
+
+  // Z→A 边
+  {
+    const zPos = objects.find(o => o.id === 'Z');
+    let aTarget, cls;
+    if (s.movedObjects && s.movedObjects.includes('A')) {
+      if (s.zRefFixed) {
+        aTarget = movedPositions['A'];
+        cls = 'edge fixed';
+      } else {
+        aTarget = objects.find(o => o.id === 'A');
+        cls = 'edge stale';
+      }
+    } else {
+      aTarget = objects.find(o => o.id === 'A');
+      cls = 'edge live';
+    }
+    const zCenter = { x: zPos.cx, y: zPos.cy };
+    const aCenter = { x: aTarget.cx, y: aTarget.cy };
+    const zEdge = edgePoint(zCenter, aCenter, 18);
+    const aEdge = edgePoint(aCenter, zCenter, 18);
+    html += `<line x1="${zEdge.x}" y1="${zEdge.y}" x2="${aEdge.x}" y2="${aEdge.y}" class="${cls}"/>`;
+    html += arrowHead(zEdge.x, zEdge.y, aEdge.x, aEdge.y, arrowColor(cls), 9);
+
+    // Z 字段标签
+    const boxX = zPos.cx - 42;
+    const boxY = zPos.cy + 24;
+    if (s.movedObjects && s.movedObjects.includes('A') && !s.zRefFixed) {
+      html += `<rect x="${boxX}" y="${boxY}" width="84" height="34" class="zfield-box"/>`;
+      html += `<text x="${boxX + 6}" y="${boxY + 13}" class="zfield-text"><tspan class="k">z.ref=</tspan><tspan class="v-old">A@R1</tspan></text>`;
+      html += `<text x="${boxX + 6}" y="${boxY + 27}" class="zfield-text"><tspan class="v-old">[M0] ≠ good!</tspan></text>`;
+    } else if (s.zRefFixed) {
+      html += `<rect x="${boxX}" y="${boxY}" width="90" height="34" class="zfield-box fixed"/>`;
+      html += `<text x="${boxX + 6}" y="${boxY + 13}" class="zfield-text"><tspan class="k">z.ref=</tspan><tspan class="v-new">A@R6</tspan></text>`;
+      html += `<text x="${boxX + 6}" y="${boxY + 27}" class="zfield-text"><tspan class="v-new">[Remapped]=good!</tspan></text>`;
+    } else {
+      html += `<rect x="${boxX}" y="${boxY}" width="84" height="34" class="zfield-box"/>`;
+      html += `<text x="${boxX + 6}" y="${boxY + 13}" class="zfield-text"><tspan class="k">z.ref=</tspan><tspan fill="var(--text)">A@R1</tspan></text>`;
+      html += `<text x="${boxX + 6}" y="${boxY + 27}" class="zfield-text"><tspan class="k">[M0]</tspan></text>`;
+    }
+  }
+
+  // 对象
+  const liveObjs = liveObjectSet(s);
+  objects.forEach(o => {
+    const isMoved = s.movedObjects && s.movedObjects.includes(o.id);
+    if (isMoved) {
+      html += `<circle cx="${o.cx}" cy="${o.cy}" r="16" class="obj forwarded"/>`;
+      html += `<text x="${o.cx}" y="${o.cy + 30}" class="obj-color-tag">→ ${movedPositions[o.id].region}</text>`;
+      const np = movedPositions[o.id];
+      html += `<circle cx="${np.cx}" cy="${np.cy}" r="16" class="obj marked"/>`;
+      html += `<text x="${np.cx}" y="${np.cy}" class="obj-label">${o.id}</text>`;
+      html += `<text x="${np.cx}" y="${np.cy + 26}" class="obj-color-tag">Remapped</text>`;
+      return;
+    }
+
+    let cls = 'obj gray';
+    if (liveObjs.has(o.id)) cls = 'obj marked';
+    if (s.markedRoots && s.markedRoots.includes(o.id)) cls = 'obj highlight';
+
+    html += `<circle cx="${o.cx}" cy="${o.cy}" r="16" class="${cls}"/>`;
+    html += `<text x="${o.cx}" y="${o.cy}" class="obj-label">${o.id}</text>`;
+    const tag = colorTag(o.id, s);
+    if (tag !== '—') {
+      html += `<text x="${o.cx}" y="${o.cy + 26}" class="obj-color-tag">${tag}</text>`;
+    }
+  });
+
+  // Load Barrier 框
+  html += `<rect x="30" y="380" width="1020" height="34" class="barrier-box ${s.showBarrier ? 'show' : ''}"/>`;
+  html += `<text x="50" y="402" class="barrier-text" style="font-weight:700">Load Barrier ${s.showBarrier ? '已武装（检查颜色位）' : '休眠'}</text>`;
+
+  // 转发表
+  if (s.movedObjects && s.movedObjects.length > 0) {
+    html += `<rect x="30" y="422" width="1020" height="42" class="table-box show"/>`;
+    html += `<text x="50" y="440" class="table-title">转发表 (Forwarding Table):</text>`;
+    let tx = 230;
+    s.movedObjects.forEach(id => {
+      const oldObj = objects.find(o => o.id === id);
+      const np = movedPositions[id];
+      html += `<text x="${tx}" y="440" class="table-row">${id}@${oldObj.region} → ${id}@${np.region}</text>`;
+      tx += 200;
+    });
+  }
+
+  svg.innerHTML = html;
+}
+
+function renderDesc() {
+  const s = stages[cur];
+  const pillCls = s.type === 'stw' ? 'stw' : s.type === 'concurrent' ? 'concurrent' : s.type === 'highlight' ? 'focus' : 'idle';
+  $('desc').innerHTML = `
+    <h2>
+      ${s.title}
+      <span class="pill ${pillCls}">${s.pill}</span>
+    </h2>
+    <p>${s.desc}</p>
+    <ul>${s.points.map(p => `<li>${p}</li>`).join('')}</ul>
+  `;
+}
+
+function renderCloseup() {
+  const cu = $('closeup');
+  if (stages[cur].key === 'barrier-hit') {
+    cu.style.display = 'block';
+  } else {
+    cu.style.display = 'none';
+  }
+}
+
+function renderControls() {
+  $('btnPrev').disabled = (cur === 0);
+  $('btnNext').disabled = (cur === stages.length - 1);
+  $('progressText').textContent = `阶段 ${cur + 1} / ${stages.length} · ${stages[cur].name}`;
+  const threads = $('threads');
+  threads.innerHTML = '';
+  const stopped = stages[cur].threads === 'stopped';
+  for (let i = 0; i < 4; i++) {
+    const d = document.createElement('div');
+    d.className = 'thread' + (stopped ? ' stopped' : '');
+    threads.appendChild(d);
+  }
+}
+
+function render() {
+  renderColorStateBar();
+  renderGCStateBar();
+  renderStepper();
+  renderSVG();
+  renderCloseup();
+  renderDesc();
+  renderControls();
+}
+
+$('btnNext').onclick = () => { if (cur < stages.length - 1) { cur++; render(); } };
+$('btnPrev').onclick = () => { if (cur > 0) { cur--; render(); } };
+$('btnReset').onclick = () => { cur = 0; render(); };
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') { if (cur < stages.length - 1) { cur++; render(); } }
+  if (e.key === 'ArrowLeft')  { if (cur > 0) { cur--; render(); } }
+});
+
+render();
+</script>
+</body>
+</html>

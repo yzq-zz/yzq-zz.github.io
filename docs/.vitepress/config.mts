@@ -35,6 +35,13 @@ export default defineConfig({
         ]
       },
       {
+        text: '学习新知识',
+        collapsed: false,
+        items: [
+          { text: 'JDK新特性：ZGC详解', link: '/learning-new/zgc' }
+        ]
+      },
+      {
         text: 'Agent项目',
         collapsed: false,
         items: [

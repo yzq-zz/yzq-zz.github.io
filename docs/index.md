@@ -23,6 +23,10 @@ hero:
 
 - [CLI / MCP 的区别与 Bash 基础](/agent/cli-vs-mcp) — 面试题：两种工具调用形态、Token 经济学、能力边界，以及 Bash 解释器原理
 
+### 学习新知识
+
+- [JDK新特性：ZGC详解](/learning-new/zgc) — 可交互演示：染色指针 / good_color 全局切换 / 惰性修复 / SATB 写屏障 / 3 STW + 2 并发周期
+
 ### 操作系统
 
 - [进程 vs 线程](/os/process-vs-thread) — 进程与线程的核心区别，以及为什么进程上下文切换比线程重（页表 / TLB / 缓存失效）

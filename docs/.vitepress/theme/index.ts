@@ -3,6 +3,7 @@ import { h } from 'vue'
 import RecallCode from '../components/RecallCode.vue'
 import OutlineCollapse from '../components/OutlineCollapse.vue'
 import AnchorComments from '../components/AnchorComments.vue'
+import ImageViewer from '../components/ImageViewer.vue'
 import './custom.css'
 
 export default {
@@ -10,7 +11,8 @@ export default {
   Layout: () =>
     h(DefaultTheme.Layout, null, {
       'aside-outline-after': () => h(OutlineCollapse),
-      'doc-after': () => h(AnchorComments)
+      'doc-after': () => h(AnchorComments),
+      'layout-bottom': () => h(ImageViewer)
     }),
   enhanceApp({ app }) {
     app.component('RecallCode', RecallCode)

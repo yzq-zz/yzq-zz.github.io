@@ -84,7 +84,7 @@ flowchart LR
 
 ## 出价链路解析
 
-![出价链路架构图](/images/bidding-chain.png)
+![出价链路架构图](/images/bidding-architecture.png)
 
 ::: details Mermaid 代码（点击展开）
 ```text
@@ -106,7 +106,7 @@ flowchart TB
         ad_engine["ad_engine<br>Go语言编排器<br>不在本地仓库"]
         User(["用户请求"])
         ad_predict["ad_predict<br>预估服务"]
-        pidbidding_handler["pidbidding_handler<br>系数查表服务"]
+        pidbidding_handler["pidbidding_handler<br>系数查表服务（主成分优选）"]
         rerankercpp["rerankercpp<br>重排与出价服务"]
         drilllib["drilllib<br>出价公式库 C++库"]
   end

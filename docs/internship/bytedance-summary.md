@@ -84,59 +84,57 @@ flowchart LR
 
 ## 出价链路解析
 
-![出价链路架构图](/images/bidding-architecture.png)
+![出价链路架构图](/images/bidding-flow.png)
 
 ::: details Mermaid 代码（点击展开）
 ```text
 flowchart TB
  subgraph SlowLink["慢链路 (离线/近线) - 决定大方向与调控系数"]
     direction TB
-        grabber["grabber<br>Flink流作业<br>清洗采集"]
-        Upstream["上游业务系统<br>订单/退款/成交"]
+        Upstream["上游业务系统"]
+        grabber["grabber<br>Flink流作业"]
         Kafka[("Kafka")]
-        piston["piston<br>C++高吞吐消费者<br>按计划维度聚合"]
-        Redis[("Redis<br>后验数据快照")]
-        swivel["swivel<br>编排引擎/慢链路大脑"]
+        piston["piston<br>C++消费者"]
+        Redis[("Redis")]
+        swivel["swivel<br>编排引擎"]
         propeller["propeller"]
         catapult["catapult<br>算法引擎 MPC"]
-        MQ[("MQ 消息队列")]
+        cache[("存储")]
+        MQ[("MQ")]
   end
- subgraph FastLink["快链路 (在线) - 用户请求瞬间完成"]
+ subgraph FastLink["快链路 (在线)"]
     direction TB
-        ad_engine["ad_engine<br>Go语言编排器<br>不在本地仓库"]
         User(["用户请求"])
+        ad_engine["ad_engine"]
         ad_predict["ad_predict<br>预估服务"]
-        pidbidding_handler["pidbidding_handler<br>系数查表服务（主成分优选）"]
-        rerankercpp["rerankercpp<br>重排与出价服务"]
-        drilllib["drilllib<br>出价公式库 C++库"]
+        pidbidding_handler["pidbidding_handler"]
+        rerankercpp["rerankercpp"]
+        drilllib["drilllib"]
   end
-    Upstream -- 实时事实数据 --> grabber
-    grabber -- 写入 --> Kafka
-    Kafka -- 消费 --> piston
-    piston -- 写入快照 --> Redis
-    swivel -. 定时/事件触发 .-> swivel
-    Redis -- 读取计划后验数据 --> swivel
-    swivel -- 获取模型参数 --> propeller
-    swivel -- 打包后验数据 --> catapult
-    catapult -- 核心动作: 扣除退款计算真实收益 --> catapult
-    catapult -- 返回调控系数 --> swivel
-    swivel -- 写回 --> Redis
-    swivel -- 异步推送系数更新 --> MQ
-    MQ -- 订阅系数更新 --> pidbidding_handler
+    Upstream --> grabber
+    grabber --> Kafka
+    Kafka --> piston
+    piston --> Redis
+    Redis --> swivel
+    swivel -. .-> swivel
+    swivel --> propeller
+    swivel --> catapult
+    catapult --> swivel
+    swivel --> Redis
+    swivel --> cache
+    swivel --> MQ
+    MQ --> pidbidding_handler
     User --> ad_engine
-    ad_engine -- "1. 获取用户级预估" --> ad_predict
-    ad_engine -- "2. 获取计划级系数" --> pidbidding_handler
-    ad_predict -- 返回 pCTR/pCVR/GMV/净成交率 --> ad_engine
-    pidbidding_handler -. 后台常驻消费者 .-> pidbidding_handler
-    pidbidding_handler -- 返回计划系数包<br>不看用户特征 --> ad_engine
-    ad_engine -- "3. 合并数据打包请求" --> rerankercpp
-    rerankercpp -- 组装上下文 --> rerankercpp
-    rerankercpp -- 调用 --> drilllib
-    drilllib -- "核心动作: GMV * 净成交率 = 净GMV" --> drilllib
-    drilllib -- 返回初步出价 --> rerankercpp
-    rerankercpp -- "4. 规则修正<br>预算打折/净成交boost" --> rerankercpp
-    rerankercpp -- 返回最终出价 --> ad_engine
+    ad_engine --> ad_predict
+    ad_engine --> pidbidding_handler
+    ad_predict --> ad_engine
+    pidbidding_handler --> ad_engine
+    ad_engine --> rerankercpp
+    rerankercpp --> drilllib
+    drilllib --> rerankercpp
+    rerankercpp --> ad_engine
 
+     Upstream:::offline
      grabber:::offline
      Kafka:::db
      piston:::offline
@@ -145,7 +143,10 @@ flowchart TB
      propeller:::offline
      catapult:::offline
      catapult:::algo
+     cache:::db
      MQ:::mq
+     User:::online
+     ad_engine:::online
      ad_predict:::online
      pidbidding_handler:::online
      rerankercpp:::online

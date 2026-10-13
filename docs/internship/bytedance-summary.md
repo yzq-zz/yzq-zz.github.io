@@ -7,6 +7,27 @@ date: 2026-10-09
 
 ## 广告竞价系统架构
 
+::: details 点击查看简化流程图
+![广告流程简化图](/images/ad-flow.png)
+
+```text
+flowchart LR
+    subgraph B[DSP]
+        direction LR
+        R[召回]
+        C1[粗排]
+        F[精排]
+        P[调价<br/>pBidPrice]
+        R -- 1w --> C1 -- 1k --> F -- 个位数 --> P
+    end
+
+    A[广告主] -- 100w --> B
+    B --> C[ADX]
+    C --> D[SSP / 媒体]
+    D --> E[用户]
+```
+:::
+
 ![DSP Auction 架构图](/images/ad-system-architecture.png)
 
 ::: details Mermaid 代码（点击展开）

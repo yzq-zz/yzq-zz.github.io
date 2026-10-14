@@ -10,7 +10,6 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: '首页', link: '/' },
-      { text: '刷题笔记', link: '/codetop-notes/problems/' },
       { text: '并发编程练习题', link: '/exercises/concurrency.html' }
     ],
     sidebar: [

@@ -14,10 +14,6 @@ hero:
 
 ## 笔记分类
 
-### 刷题笔记
-
-- [题目列表](/codetop-notes/problems/) — 刷题笔记，笔记同步到 GitHub Gist
-
 ### Java知识
 
 - [并发编程练习题](/exercises/concurrency.html) — 基于《Java并发编程的艺术》《Java并发编程实战》的 badcase 练习

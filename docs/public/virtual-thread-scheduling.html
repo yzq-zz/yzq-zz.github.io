@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>虚拟线程调度 · 一步步看懂</title>
+<style>
+:root{
+  --bg:#0b0e14; --panel:#141821; --panel2:#1a1f2e; --line:#2a3142;
+  --txt:#e6e9ef; --muted:#8b95a8;
+  --green:#3ddc97; --blue:#5aa9ff; --amber:#ffb454; --red:#ff6b6b; --purple:#b48bff;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  padding:26px 16px 70px;
+  background:radial-gradient(1200px 700px at 50% -15%, #17223c 0%, var(--bg) 62%);
+  color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;overflow-x:auto;}
+h1{font-size:24px;text-align:center;margin-bottom:8px;
+  background:linear-gradient(90deg,#3ddc97,#5aa9ff,#b48bff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;}
+.sub{text-align:center;color:var(--muted);font-size:13.5px;margin-bottom:20px;}
+code{background:rgba(90,169,255,.13);color:#8cc7ff;padding:1px 6px;border-radius:5px;
+  font-family:"SF Mono",ui-monospace,Consolas,monospace;font-size:.88em;}
+b{color:#fff;font-weight:600;}
+
+/* ============ 图例 ============ */
+.legend{
+  display:flex;gap:20px;justify-content:center;flex-wrap:wrap;
+  margin-bottom:14px;padding:12px 18px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+}
+.legend-item{display:flex;align-items:center;gap:9px;font-size:12.5px;color:#c2cad9;}
+.swatch{width:26px;height:18px;border-radius:5px;flex:0 0 auto;}
+.sw-carrier{background:rgba(90,169,255,.16);border:2px solid var(--blue);}
+.sw-vt{background:rgba(61,220,151,.18);border:2px solid var(--green);border-radius:8px;}
+.sw-frozen{background:rgba(180,139,255,.16);border:2px dashed var(--purple);border-radius:8px;}
+.sw-heap{background:rgba(255,180,84,.06);border:1px dashed rgba(255,180,84,.5);}
+
+/* ============ 舞台 ============ */
+.stage{
+  position:relative;
+  min-width:920px;width:100%;height:680px;
+  background:
+    linear-gradient(rgba(255,255,255,.014) 1px, transparent 1px) 0 0/100% 40px,
+    linear-gradient(90deg, rgba(255,255,255,.014) 1px, transparent 1px) 0 0/40px 100%,
+    var(--panel);
+  border:1px solid var(--line);border-radius:18px;overflow:hidden;
+}
+
+/* 顶部步骤指示 */
+.step-badge{
+  position:absolute;left:50%;top:18px;transform:translateX(-50%);
+  font-size:12.5px;color:#c2cad9;
+  padding:5px 16px;border-radius:20px;
+  background:rgba(90,169,255,.1);
+  border:1px solid rgba(90,169,255,.28);
+  letter-spacing:.3px;
+  z-index:30;
+  white-space:nowrap;
+}
+.step-badge b{color:#8cc7ff;}
+
+/* 区域标签 */
+.zone-label{
+  position:absolute;left:22px;
+  font-size:11.5px;letter-spacing:.4px;
+  padding:4px 12px;border-radius:7px;
+  z-index:5;
+}
+.zone-carrier{top:18px;color:#8cc7ff;border:1px solid rgba(90,169,255,.28);
+  background:rgba(90,169,255,.06);}
+.zone-heap{top:348px;color:rgba(255,180,84,.9);border:1px solid rgba(255,180,84,.28);
+  background:rgba(255,180,84,.06);}
+
+/* 堆区 */
+.heap-zone{
+  position:absolute;left:3%;right:3%;top:380px;height:260px;
+  border:1px dashed rgba(255,180,84,.24);
+  border-radius:16px;background:rgba(255,180,84,.022);
+  z-index:0;
+}
+.heap-note{
+  position:absolute;right:24px;bottom:14px;
+  font-size:11px;color:rgba(255,180,84,.45);
+  letter-spacing:.3px;
+}
+
+/* 载体线程 */
+.carrier{
+  position:absolute;width:200px;height:140px;
+  transform:translate(-50%,-50%);
+  border:2px solid rgba(90,169,255,.35);
+  border-radius:16px;
+  background:rgba(90,169,255,.04);
+  transition:all .45s;
+  z-index:1;
+}
+.carrier[data-state="busy"]{
+  border-color:var(--blue);
+  background:rgba(90,169,255,.11);
+  box-shadow:0 0 30px rgba(90,169,255,.25), inset 0 0 24px rgba(90,169,255,.05);
+}
+.carrier-title{
+  position:absolute;top:12px;left:0;right:0;text-align:center;
+  font-size:13px;color:#8cc7ff;letter-spacing:.3px;font-weight:700;
+}
+.carrier-sub{
+  position:absolute;top:32px;left:0;right:0;text-align:center;
+  font-size:10px;color:var(--muted);letter-spacing:.4px;
+}
+.carrier-slot{
+  position:absolute;left:14px;right:14px;top:56px;bottom:14px;
+  border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;color:rgba(139,149,168,.7);
+  transition:all .35s;
+}
+.carrier[data-state="busy"] .carrier-slot{color:transparent;}
+
+/* 虚拟线程 */
+.vt{
+  position:absolute;width:150px;height:62px;
+  transform:translate(-50%,-50%);
+  border-radius:14px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  z-index:6;
+  border:2px solid rgba(61,220,151,.55);
+  background:rgba(61,220,151,.1);
+  transition:
+    left .8s cubic-bezier(.34,.02,.2,1),
+    top  .8s cubic-bezier(.34,.02,.2,1),
+    border-color .35s, background .35s, box-shadow .35s, opacity .35s;
+}
+.vt-name{font-size:13px;font-weight:700;color:#c8ffe8;letter-spacing:.3px;}
+.vt-tag{font-size:10px;color:var(--muted);letter-spacing:.3px;}
+.vt[data-state="ready"]{border-color:rgba(61,220,151,.45);background:rgba(61,220,151,.07);}
+.vt[data-state="running"]{
+  border-color:var(--green);background:rgba(61,220,151,.22);
+  box-shadow:0 0 28px rgba(61,220,151,.4);
+}
+.vt[data-state="running"] .vt-tag{color:var(--green);}
+.vt[data-state="blocked"]{
+  border-color:var(--amber);background:rgba(255,180,84,.16);
+  box-shadow:0 0 22px rgba(255,180,84,.22);
+}
+.vt[data-state="blocked"] .vt-tag{color:var(--amber);}
+.vt[data-state="frozen"]{
+  border-color:var(--purple);border-style:dashed;
+  background:rgba(180,139,255,.13);
+  box-shadow:0 0 18px rgba(180,139,255,.16);
+}
+.vt[data-state="frozen"] .vt-tag{color:var(--purple);}
+
+/* 方法调用气泡 */
+.callout{
+  position:absolute;
+  transform:translate(-50%,-50%);
+  padding:5px 13px;border-radius:20px;
+  font-size:11.5px;font-weight:600;
+  font-family:"SF Mono",ui-monospace,Consolas,monospace;
+  white-space:nowrap;
+  z-index:20;
+  opacity:0;
+  transition:opacity .3s, top .5s, left .5s;
+  pointer-events:none;
+}
+.callout.show{opacity:1;}
+.callout.run{
+  background:rgba(61,220,151,.2);color:#7ee0b4;
+  border:1px solid rgba(61,220,151,.5);
+  box-shadow:0 0 18px rgba(61,220,151,.25);
+}
+.callout.yield{
+  background:rgba(180,139,255,.2);color:#d0b8ff;
+  border:1px solid rgba(180,139,255,.5);
+  box-shadow:0 0 18px rgba(180,139,255,.25);
+}
+.callout.block{
+  background:rgba(255,180,84,.2);color:#ffce8a;
+  border:1px solid rgba(255,180,84,.5);
+}
+
+/* ============ 控制区 ============ */
+.controls{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap;}
+.controls button{
+  font-family:inherit;background:var(--panel2);border:1px solid var(--line);
+  color:var(--txt);padding:9px 16px;border-radius:9px;font-size:13.5px;
+  cursor:pointer;transition:all .2s;
+}
+.controls button:hover:not(:disabled){border-color:#46516b;background:#222840;}
+.controls button:disabled{opacity:.32;cursor:not-allowed;}
+.controls button.primary{
+  background:linear-gradient(135deg,#3ddc97,#5aa9ff);
+  color:#0b0e14;border-color:transparent;font-weight:600;
+}
+.dots{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;}
+.dot{
+  width:27px;height:27px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--muted);font-size:12px;cursor:pointer;
+  transition:all .25s;font-family:inherit;
+}
+.dot:hover{border-color:#46516b;color:var(--txt);}
+.dot.active{background:linear-gradient(135deg,#3ddc97,#5aa9ff);color:#0b0e14;
+  border-color:transparent;font-weight:700;}
+
+/* ============ 说明面板 ============ */
+.explain{
+  margin-top:16px;background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--green);border-radius:12px;padding:18px 22px;
+}
+.explain h3{margin-bottom:12px;font-size:16px;color:#fff;}
+.explain .row{
+  display:grid;grid-template-columns:110px 1fr;gap:10px;
+  font-size:13.5px;line-height:1.8;color:#b9c2d4;margin-bottom:7px;
+}
+.explain .row:last-child{margin-bottom:0;}
+.explain .k{color:var(--muted);font-size:12.5px;padding-top:2px;}
+.explain .v code{margin:0 2px;}
+
+.snippet{
+  margin-top:12px;background:#0a0d13;border:1px solid var(--line);border-radius:9px;
+  padding:12px 16px;font-family:"SF Mono",ui-monospace,Consolas,monospace;
+  font-size:12px;line-height:1.75;color:#8b95a8;overflow-x:auto;
+}
+.snippet .hl{color:#7ee0b4;font-weight:600;}
+.snippet .hl2{color:#d0b8ff;font-weight:600;}
+.snippet .dim{color:#4d5668;}
+
+footer{text-align:center;margin-top:28px;font-size:12px;color:#5c6579;line-height:1.9;}
+
+/* ============ yzq 标志水印 ============ */
+.yzq-badge{
+  position:fixed;top:14px;right:18px;z-index:100;
+  display:inline-flex;align-items:center;gap:8px;
+  padding:7px 14px;border-radius:999px;
+  background:linear-gradient(135deg,rgba(61,220,151,.18),rgba(90,169,255,.18));
+  border:1px solid rgba(61,220,151,.45);
+  color:#c8ffe8;font-size:12.5px;font-weight:700;
+  letter-spacing:.4px;text-decoration:none;
+  backdrop-filter:blur(6px);
+  box-shadow:0 4px 18px rgba(0,0,0,.35);
+  transition:all .2s;
+}
+.yzq-badge:hover{
+  border-color:var(--green);
+  box-shadow:0 6px 22px rgba(61,220,151,.35);
+  transform:translateY(-1px);
+}
+.yzq-badge .dot-yzq{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--green);box-shadow:0 0 10px rgba(61,220,151,.7);
+}
+.yzq-badge .arr{color:var(--blue);font-weight:800;}
+</style>
+</head>
+<body>
+
+<!-- yzq 标志（右上角水印，点击回到笔记） -->
+<a class="yzq-badge" href="/learning-new/virtual-thread-scheduling-text" target="_self" title="返回 yzq 学习笔记">
+  <span class="dot-yzq"></span>
+  <span>yzq 学习笔记</span>
+  <span class="arr">↩</span>
+</a>
+
+<div class="wrap">
+
+  <h1>虚拟线程调度 · 一步步看懂</h1>
+  <p class="sub">用「乘客与座位」的模型，说清 Continuation.run() / yield() 的调用时机</p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="swatch sw-carrier"></div>载体线程（平台线程 / OS 线程）</div>
+    <div class="legend-item"><div class="swatch sw-vt"></div>虚拟线程（被调度的轻量任务）</div>
+    <div class="legend-item"><div class="swatch sw-frozen"></div>虚拟线程已冻结（栈帧在堆上）</div>
+    <div class="legend-item"><div class="swatch sw-heap"></div>Java 堆（StackChunk 存放区）</div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="step-badge" id="stepBadge"><b>第 1/7 步</b> · 初始状态</div>
+
+    <div class="zone-label zone-carrier">载体线程池 · ForkJoinPool（并行度 ≈ CPU 核心数）</div>
+    <div class="heap-zone"></div>
+    <div class="zone-label zone-heap">Java 堆 Heap · 冻结的虚拟线程栈帧（StackChunk）</div>
+    <div class="heap-note">★ 虚拟线程 = 乘客　载体线程 = 座位　只有坐上座位才能跑</div>
+
+    <!-- 载体线程 -->
+    <div class="carrier" id="c0" data-state="idle" style="left:18%;top:200px">
+      <div class="carrier-title">载体线程 C1</div>
+      <div class="carrier-sub">PLATFORM THREAD</div>
+      <div class="carrier-slot">空闲</div>
+    </div>
+    <div class="carrier" id="c1" data-state="idle" style="left:50%;top:200px">
+      <div class="carrier-title">载体线程 C2</div>
+      <div class="carrier-sub">PLATFORM THREAD</div>
+      <div class="carrier-slot">空闲</div>
+    </div>
+    <div class="carrier" id="c2" data-state="idle" style="left:82%;top:200px">
+      <div class="carrier-title">载体线程 C3</div>
+      <div class="carrier-sub">PLATFORM THREAD</div>
+      <div class="carrier-slot">空闲</div>
+    </div>
+
+    <!-- 虚拟线程（初始在堆区） -->
+    <div class="vt" id="vt0" data-state="ready" style="left:18%;top:520px">
+      <span class="vt-name">VT-1</span>
+      <span class="vt-tag">虚拟线程 · 就绪</span>
+    </div>
+    <div class="vt" id="vt1" data-state="ready" style="left:50%;top:520px">
+      <span class="vt-name">VT-2</span>
+      <span class="vt-tag">虚拟线程 · 就绪</span>
+    </div>
+    <div class="vt" id="vt2" data-state="ready" style="left:82%;top:520px">
+      <span class="vt-name">VT-3</span>
+      <span class="vt-tag">虚拟线程 · 就绪</span>
+    </div>
+
+    <!-- 方法调用气泡 -->
+    <div class="callout run"   id="co0">Continuation.run()</div>
+    <div class="callout yield" id="co1">Continuation.yield()</div>
+    <div class="callout block" id="co2">socket.read() 阻塞</div>
+  </div>
+
+  <div class="controls">
+    <button id="prev">‹ 上一步</button>
+    <button id="next" class="primary">下一步 ›</button>
+    <button id="play">▶ 自动播放</button>
+    <button id="reset">↺ 回到开头</button>
+    <div class="dots" id="dots"></div>
+  </div>
+
+  <div class="explain">
+    <h3 id="stepTitle">① 初始状态</h3>
+    <div class="row"><div class="k">虚拟线程</div><div class="v" id="dVT"></div></div>
+    <div class="row"><div class="k">载体线程</div><div class="v" id="dCarrier"></div></div>
+    <div class="row"><div class="k">调用的方法</div><div class="v" id="dCall"></div></div>
+    <div class="snippet" id="dCode"></div>
+  </div>
+
+  <footer>← → 方向键切换步骤　·　内容基于 JDK 21 虚拟线程（JEP 444）</footer>
+</div>
+
+<script>
+/* ========== 坐标 ========== */
+const POS = {
+  /* 载体位置（三个载体卡片中心） */
+  c0:{l:'18%', t:'200px'},
+  c1:{l:'50%', t:'200px'},
+  c2:{l:'82%', t:'200px'},
+  /* 堆区位置（三个虚拟线程初始位置） */
+  h0:{l:'18%', t:'520px'},
+  h1:{l:'50%', t:'520px'},
+  h2:{l:'82%', t:'520px'}
+};
+
+const TAG = {
+  ready  : '虚拟线程 · 就绪',
+  running: '虚拟线程 · 运行中',
+  blocked: '虚拟线程 · 等待 I/O',
+  frozen : '虚拟线程 · 已冻结'
+};
+
+function setVT(i, pos, st){
+  const el = document.getElementById('vt' + i);
+  el.style.left = POS[pos].l;
+  el.style.top  = POS[pos].t;
+  el.dataset.state = st;
+  el.querySelector('.vt-tag').textContent = TAG[st] || st;
+}
+
+function setCarrier(i, st){
+  document.getElementById('c' + i).dataset.state = st;
+}
+
+function hideCallouts(){
+  document.querySelectorAll('.callout').forEach(c => c.classList.remove('show'));
+}
+
+function showCallout(id, left, top){
+  const c = document.getElementById(id);
+  c.style.left = left;
+  c.style.top  = top;
+  c.classList.add('show');
+}
+
+/* ========== 步骤定义 ========== */
+const steps = [
+{
+  badge: '初始状态',
+  title: '① 初始状态：3 个虚拟线程躺在堆里等待调度',
+  v: 'VT-1 / VT-2 / VT-3 刚被 <code>Thread.ofVirtual().start()</code> 创建，<b>还没有任何载体线程在跑它们</b>。它们此刻是「就绪」状态，排在调度器的队列里。',
+  c: 'C1 / C2 / C3 三个载体线程全部空闲。它们是 ForkJoinPool 的工作线程，数量 ≈ CPU 核心数，是真正能调用系统调用、真正占着 CPU 的那批线程。',
+  call: '还没有调用任何 Continuation 方法 —— 因为还没有虚拟线程坐上载体线程。',
+  code: '<span class="dim">// 创建 3 个虚拟线程，此时它们都还没跑</span>\n' +
+        'Thread.ofVirtual().start(task1);  <span class="dim">// → VT-1 就绪</span>\n' +
+        'Thread.ofVirtual().start(task2);  <span class="dim">// → VT-2 就绪</span>\n' +
+        'Thread.ofVirtual().start(task3);  <span class="dim">// → VT-3 就绪</span>',
+  go(){
+    hideCallouts();
+    setVT(0,'h0','ready'); setVT(1,'h1','ready'); setVT(2,'h2','ready');
+    setCarrier(0,'idle'); setCarrier(1,'idle'); setCarrier(2,'idle');
+  }
+},
+{
+  badge: '挂载 Mount',
+  title: '② 调度器把 VT-1 分配给 C1 → 调用 Continuation.run()',
+  v: '调度器从就绪队列取出 VT-1，选中空闲的 C1。JVM 把 VT-1 的栈帧准备好，然后<b>在 C1 上调用 <code>Continuation.run()</code></b>。',
+  c: 'C1 从「空闲」变成「忙碌」。<b>从这一刻起，C1 的原生栈上跑的就是 VT-1 的代码。</b>对操作系统来说，它只知道 C1 在跑，完全不知道上面还坐了个虚拟线程。',
+  call: '<b>第一次调用 <code>Continuation.run()</code></b>：这是虚拟线程「开始执行」的入口。run() 会一路执行 task 里的代码，直到遇到 yield 或者任务结束。',
+  code: '<span class="dim">// 调度器内部大致逻辑</span>\n' +
+        'carrierThread.execute(() -> {\n' +
+        '    <span class="hl">continuation.run();</span>  <span class="dim">// ← VT-1 从这里开始跑</span>\n' +
+        '});',
+  go(){
+    hideCallouts();
+    setVT(0,'c0','running'); setVT(1,'h1','ready'); setVT(2,'h2','ready');
+    setCarrier(0,'busy'); setCarrier(1,'idle'); setCarrier(2,'idle');
+    showCallout('co0','18%','75px');
+  }
+},
+{
+  badge: '遇到阻塞',
+  title: '③ VT-1 在 C1 上执行，直到调用 socket.read()',
+  v: 'VT-1 在 C1 上正常跑 Java 代码。跑到 <code>socket.read()</code> 时，I/O 还没就绪 —— 如果它是平台线程，这里就会把整个 OS 线程挂起。但它是虚拟线程，JDK 的 socket 实现是「虚拟线程感知」的。',
+  c: 'C1 此刻仍然忙碌，正在执行 socket.read() 的入口逻辑。',
+  call: '<b>还没有调用 yield()。</b>先判断：当前是不是虚拟线程？I/O 能不能立刻完成？如果不能，就走「让出」这条路。',
+  code: '<span class="dim">// VT-1 执行的业务代码</span>\n' +
+        'void task() {\n' +
+        '    var data = <span class="hl2">socket.read();</span>  <span class="dim">// ← I/O 未就绪，要挂起</span>\n' +
+        '    process(data);\n' +
+        '}',
+  go(){
+    hideCallouts();
+    setVT(0,'c0','blocked'); setVT(1,'h1','ready'); setVT(2,'h2','ready');
+    setCarrier(0,'busy'); setCarrier(1,'idle'); setCarrier(2,'idle');
+    showCallout('co2','18%','75px');
+  }
+},
+{
+  badge: '冻结栈帧',
+  title: '④ 冻结栈帧 → 调用 Continuation.yield()',
+  v: 'JVM 把 VT-1 整个调用栈的栈帧<b>打包成 StackChunk 对象，冻结到堆上</b>。局部变量、程序计数器、操作数栈全部原样保存 —— 一个字节都不丢。',
+  c: 'C1 仍在执行，但执行的是「冻结 + 让出」这套调度逻辑，而不是用户的业务代码了。',
+  call: '<b>这里调用 <code>Continuation.yield()</code></b>。它做两件事：① 把栈帧冻结成 StackChunk；② 让 <code>run()</code> 返回。run() 一返回，C1 上的这个 lambda 就执行完了。',
+  code: '<span class="dim">// Continuation.yield() 的效果</span>\n' +
+        '<span class="hl2">yield()</span> {\n' +
+        '    把当前所有栈帧 → <span class="hl">StackChunk 对象（堆上）</span>\n' +
+        '    让 <span class="hl">run()</span> 返回  <span class="dim">// 控制权交回调度器</span>\n' +
+        '}',
+  go(){
+    hideCallouts();
+    setVT(0,'c0','frozen'); setVT(1,'h1','ready'); setVT(2,'h2','ready');
+    setCarrier(0,'busy'); setCarrier(1,'idle'); setCarrier(2,'idle');
+    showCallout('co1','18%','75px');
+  }
+},
+{
+  badge: '卸载 Unmount',
+  title: '⑤ 卸载 Unmount：VT-1 下座位，C1 被释放',
+  v: 'VT-1 从 C1 上「下车」，回到堆里变成一堆冻结的 StackChunk。它的状态是「等待 I/O 完成」，<b>不占任何载体线程</b>。',
+  c: '<b>C1 立刻恢复空闲！</b>这就是整个模型最关键的一步。C1 完全没有被阻塞，它可以马上去跑别的虚拟线程。',
+  call: '<code>run()</code> 已经返回了（第 ④ 步触发的）。此刻没有任何方法在调用中，等待调度器分配新任务。',
+  code: '<span class="dim">// 关键结论</span>\n' +
+        '被阻塞的是 <span class="hl">VT-1 自己</span>（堆上的一堆对象）\n' +
+        '而 <span class="hl">C1 一毫秒都没有被阻塞</span>  →  立刻可复用',
+  go(){
+    hideCallouts();
+    setVT(0,'h0','frozen'); setVT(1,'h1','ready'); setVT(2,'h2','ready');
+    setCarrier(0,'idle'); setCarrier(1,'idle'); setCarrier(2,'idle');
+  }
+},
+{
+  badge: '复用载体',
+  title: '⑥ 复用！同一个 C1 马上拿去跑 VT-2',
+  v: '调度器把刚空出来的 C1 分配给 VT-2。VT-2 进入运行状态。<b>注意：VT-1 还躺在堆里等 I/O，但 C1 已经在为新任务干活了。</b>',
+  c: 'C1 重新变忙碌，这次跑的是 VT-2 的代码。这就是「M 个虚拟线程复用 N 个载体线程」最直观的样子。',
+  call: '调度器在 C1 上<b>再次调用 <code>Continuation.run()</code></b> —— 不过这次是 VT-2 的 Continuation。',
+  code: '<span class="dim">// 同一个载体线程，换了乘客</span>\n' +
+        'C1: 跑 VT-1  <span class="dim">→ VT-1 yield 下车 →</span>  C1 空闲\n' +
+        'C1: <span class="hl">跑 VT-2</span>  <span class="dim">// 无缝衔接，C1 一直在干活</span>',
+  go(){
+    hideCallouts();
+    setVT(0,'h0','frozen'); setVT(1,'c0','running'); setVT(2,'h2','ready');
+    setCarrier(0,'busy'); setCarrier(1,'idle'); setCarrier(2,'idle');
+    showCallout('co0','18%','75px');
+  }
+},
+{
+  badge: '解冻恢复',
+  title: '⑦ I/O 就绪：VT-1 解冻恢复，从断点继续 → 再调 run()',
+  v: 'epoll 通知 socket 可读了。调度器把 VT-1 放回就绪队列，这次分配给空闲的 C2。JVM 把堆上的 StackChunk <b>解冻、复制回 C2 的原生栈</b>，<b>从 <code>yield()</code> 的返回点继续执行</b>，就像什么都没发生过。',
+  c: '现在 C1 跑 VT-2，C2 跑 VT-1，两个载体线程同时在干活，同时有两个虚拟线程在推进。这就是并发。',
+  call: '<b>又调用了 <code>Continuation.run()</code></b>，但这次语义不同：不是从头开始，而是「恢复」—— 从上次 yield 的地方往下走。',
+  code: '<span class="dim">// 恢复时再次调用 run()</span>\n' +
+        'continuation.<span class="hl">run()</span>;  <span class="dim">// 从 yield() 的返回点继续</span>\n' +
+        'var data = socket.read();  <span class="dim">// ← 这次立刻拿到数据</span>\n' +
+        'process(data);',
+  go(){
+    hideCallouts();
+    setVT(0,'c1','running'); setVT(1,'c0','running'); setVT(2,'h2','ready');
+    setCarrier(0,'busy'); setCarrier(1,'busy'); setCarrier(2,'idle');
+    showCallout('co0','50%','75px');
+  }
+}
+];
+
+/* ========== 控制逻辑 ========== */
+let cur = 0, timer = null;
+
+const dotsEl    = document.getElementById('dots');
+const dVT       = document.getElementById('dVT');
+const dCarrier  = document.getElementById('dCarrier');
+const dCall     = document.getElementById('dCall');
+const dCode     = document.getElementById('dCode');
+const stepTitle = document.getElementById('stepTitle');
+const stepBadge = document.getElementById('stepBadge');
+const prevBtn   = document.getElementById('prev');
+const nextBtn   = document.getElementById('next');
+const playBtn   = document.getElementById('play');
+const resetBtn  = document.getElementById('reset');
+
+steps.forEach((_, i) => {
+  const b = document.createElement('button');
+  b.className = 'dot'; b.textContent = i + 1;
+  b.addEventListener('click', () => { stopPlay(); goto(i); });
+  dotsEl.appendChild(b);
+});
+
+function goto(i){
+  cur = Math.max(0, Math.min(steps.length - 1, i));
+  const s = steps[cur];
+  s.go();
+
+  stepBadge.innerHTML = `<b>第 ${cur + 1}/${steps.length} 步</b> · ${s.badge}`;
+  stepTitle.innerHTML = s.title;
+  dVT.innerHTML = s.v;
+  dCarrier.innerHTML = s.c;
+  dCall.innerHTML = s.call;
+  dCode.innerHTML = s.code;
+
+  [...dotsEl.children].forEach((d, k) => d.classList.toggle('active', k === cur));
+  prevBtn.disabled = cur === 0;
+  nextBtn.disabled = cur === steps.length - 1;
+}
+
+function stopPlay(){
+  if (timer) { clearInterval(timer); timer = null; }
+  playBtn.textContent = '▶ 自动播放';
+  playBtn.classList.remove('primary');
+}
+
+prevBtn.addEventListener('click', () => { stopPlay(); goto(cur - 1); });
+nextBtn.addEventListener('click', () => { stopPlay(); goto(cur + 1); });
+resetBtn.addEventListener('click', () => { stopPlay(); goto(0); });
+
+playBtn.addEventListener('click', () => {
+  if (timer) { stopPlay(); return; }
+  playBtn.textContent = '⏸ 暂停';
+  playBtn.classList.add('primary');
+  if (cur === steps.length - 1) goto(0);
+  timer = setInterval(() => {
+    if (cur >= steps.length - 1) { stopPlay(); return; }
+    goto(cur + 1);
+  }, 3400);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') { stopPlay(); goto(cur + 1); }
+  if (e.key === 'ArrowLeft')  { stopPlay(); goto(cur - 1); }
+});
+
+goto(0);
+</script>
+</body>
+</html>

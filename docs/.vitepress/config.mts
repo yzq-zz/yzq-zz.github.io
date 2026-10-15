@@ -46,7 +46,9 @@ export default defineConfig({
         text: '学习新知识',
         collapsed: false,
         items: [
-          { text: 'JDK新特性：ZGC详解', link: '/learning-new/zgc' }
+          { text: 'JDK新特性：ZGC详解', link: '/learning-new/zgc' },
+          { text: '虚拟线程调度 · 一步步看懂', link: '/learning-new/virtual-thread-scheduling-text' },
+          { text: '虚拟线程调度 · 可交互演示', link: '/learning-new/virtual-thread-scheduling' }
         ]
       },
       {

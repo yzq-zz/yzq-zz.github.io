@@ -30,6 +30,8 @@ hero:
 ### 学习新知识
 
 - [JDK新特性：ZGC详解](/learning-new/zgc) — 可交互演示：染色指针 / good_color 全局切换 / 惰性修复 / SATB 写屏障 / 3 STW + 2 并发周期
+- [虚拟线程调度 · 一步步看懂](/learning-new/virtual-thread-scheduling-text) — 「乘客与座位」模型：Continuation.run() / yield() 时机、StackChunk 冻结、Mount/Unmount、M 个 VT 复用 N 个载体
+- [虚拟线程调度 · 可交互演示](/learning-new/virtual-thread-scheduling) — 7 步动图：VT 挂载、I/O 阻塞、栈帧冻结、卸载、复用、解冻恢复
 
 ### 操作系统
 

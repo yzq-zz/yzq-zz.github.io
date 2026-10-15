@@ -23,6 +23,10 @@ hero:
 
 - [CLI / MCP 的区别与 Bash 基础](/agent/cli-vs-mcp) — 面试题：两种工具调用形态、Token 经济学、能力边界，以及 Bash 解释器原理
 
+### 数据库
+
+- [数据库防超卖：原子 UPDATE + 影响行数](/database/deadlock-prevention) — 一条 `UPDATE ... WHERE stock > 0` 解决并发扣减：当前读 + 行锁 + 影响行数判断
+
 ### 学习新知识
 
 - [JDK新特性：ZGC详解](/learning-new/zgc) — 可交互演示：染色指针 / good_color 全局切换 / 惰性修复 / SATB 写屏障 / 3 STW + 2 并发周期

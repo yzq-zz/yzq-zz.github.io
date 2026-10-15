@@ -36,6 +36,13 @@ export default defineConfig({
         ]
       },
       {
+        text: '数据库',
+        collapsed: false,
+        items: [
+          { text: '数据库防超卖：原子 UPDATE + 影响行数', link: '/database/deadlock-prevention' }
+        ]
+      },
+      {
         text: '学习新知识',
         collapsed: false,
         items: [
